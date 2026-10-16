@@ -1,0 +1,13 @@
+# Project place file
+/Random_Game_1.rbxlx
+
+# Roblox Studio lock files
+/*.rbxlx.lock
+/*.rbxl.lock
+
+sourcemap.json
+Packages/
+ServerPackages/
+sourcemap.json
+wally.lock
+
