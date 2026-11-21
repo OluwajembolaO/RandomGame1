@@ -1,16 +1,25 @@
 local T = require("./lib/T")
 local Configs = require("../src/shared/Configs")
+local Kit = require("../src/shared/Rules/Kit")
 local Rng = require("../src/shared/Rules/Rng")
 local Track = require("../src/shared/Rules/Track")
 
-local zone = Configs.Zones[1]
+local pieces = Configs.Kit.Pieces
+local spec = Configs.Zones[1].Kit
 local STEP = Configs.Run.Track.Step
 local START = { x = 0, y = Configs.Run.StationHeight, z = 0 }
 local RULES = { MaxStep = STEP * 1.5, MinY = -400, BaseHeading = 0 }
 
-local function leg(seed: number, length: number?)
-    local pieces = Track.pieces(Rng.new(seed), zone.Track, length or 1300, 0, 0)
-    return Track.build(pieces, START, 0, STEP), pieces
+local function trackOf(ids: { string })
+    local list = {}
+    for _, id in ids do
+        table.insert(list, Kit.trackPiece(pieces[id]))
+    end
+    return Track.build(list, START, 0, STEP)
+end
+
+local function leg(seed: number)
+    return trackOf(Kit.leg(Rng.new(seed), pieces, spec, 1300, 0, 0))
 end
 
 local function copy(track)
@@ -25,36 +34,18 @@ local function copy(track)
 end
 
 T.describe("Track", function()
-    T.it("rolls a rideable track for every seed", function()
+    T.it("builds a rideable track from every rolled leg", function()
         for seed = 1, 100 do
             local ok, problem = Track.validate(leg(seed), RULES)
             T.truthy(ok, "seed " .. seed .. ": " .. tostring(problem))
         end
     end)
 
-    T.it("adds up to the leg's horizontal length", function()
-        local _, pieces = leg(11)
-        local total = 0
-        for _, piece in pieces do
-            total += piece.length
-        end
-        T.near(total, 1300, 1e-6)
-    end)
-
-    T.it("puts at least one sharp curve on every leg", function()
-        for seed = 1, 100 do
-            T.truthy(#leg(seed).sharp >= 1, "seed " .. seed)
-        end
-    end)
-
-    T.it("keeps the heading inside MaxHeading", function()
-        for seed = 1, 100 do
-            local heading = 0
-            for _, piece in select(2, leg(seed)) do
-                heading += piece.turn
-                T.truthy(math.abs(heading) <= zone.Track.MaxHeading + 1e-9, "seed " .. seed)
-            end
-        end
+    T.it("ends a bend facing its turn and lower by its drop", function()
+        local bend = pieces.Tunnel_BendR
+        local track = trackOf({ "Tunnel_BendR" })
+        T.near(track.endHeading, bend.Turn, 1e-9)
+        T.near(track.points[#track.points].y, START.y - bend.Drop, 1e-9)
     end)
 
     T.it("samples positions and unit directions by distance", function()
@@ -68,7 +59,7 @@ T.describe("Track", function()
         T.near(last.z, tail.z)
         local _, direction = Track.sample(track, track.length / 2)
         T.near(math.sqrt(direction.x ^ 2 + direction.y ^ 2 + direction.z ^ 2), 1, 1e-9)
-        T.truthy(direction.y < 0, "the track slopes down")
+        T.truthy(direction.y <= 0, "the track never climbs")
     end)
 
     T.it("interpolates between sampled points", function()
@@ -79,13 +70,35 @@ T.describe("Track", function()
         T.near(mid.y, (a.y + b.y) / 2, 1e-9)
     end)
 
-    T.it("knows where the sharp curves are", function()
-        local track = leg(4)
+    T.it("knows where the sharp bends are", function()
+        local track = trackOf({ spec.Straight, "Tunnel_SharpR", spec.Straight })
+        T.equal(#track.sharp, 1)
         local span = track.sharp[1]
         T.truthy(Track.sharpAt(track, (span.from + span.to) / 2), "inside")
         T.falsy(Track.sharpAt(track, span.from - 1), "before")
         T.equal(Track.nextSharp(track, 0), span)
         T.equal(Track.nextSharp(track, track.length + 1), nil)
+    end)
+
+    T.it("measures grade and curvature along the track", function()
+        local straight = pieces[spec.Straight]
+        local grade, curvature = Track.shapeAt(trackOf({ spec.Straight }), 32)
+        T.near(grade, straight.Drop / straight.Length, 1e-6)
+        T.near(curvature, 0, 1e-9)
+        local bend = pieces.Tunnel_BendR
+        local _, right = Track.shapeAt(trackOf({ "Tunnel_BendR" }), 32)
+        T.near(right, bend.Turn / bend.Length, 1e-3)
+        local _, left = Track.shapeAt(trackOf({ "Tunnel_BendL" }), 32)
+        T.truthy(left < 0, "left bends curve negative")
+    end)
+
+    T.it("joins tracks end to end", function()
+        local a = trackOf({ spec.Straight })
+        local b = Track.build({ Kit.trackPiece(pieces.Tunnel_BendL) }, a.points[#a.points], a.endHeading, STEP)
+        local joined = Track.concat({ a, b })
+        T.near(joined.length, a.length + b.length, 1e-9)
+        T.equal(#joined.points, #a.points + #b.points - 1)
+        T.near(joined.endHeading, b.endHeading)
     end)
 
     T.it("catches a track that climbs", function()
@@ -96,8 +109,7 @@ T.describe("Track", function()
 
     T.it("catches a step that's too long", function()
         local track = copy(leg(5))
-        track.distances[10] += STEP * 3
-        for i = 11, #track.distances do
+        for i = 10, #track.distances do
             track.distances[i] += STEP * 3
         end
         T.falsy((Track.validate(track, RULES)))

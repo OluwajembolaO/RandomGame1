@@ -5,6 +5,12 @@
       "command": "cmd.exe",
       "args": ["/c", "%LOCALAPPDATA%\\Roblox\\mcp.bat"],
       "env": {}
+    },
+    "blender": {
+      "type": "stdio",
+      "command": "C:\\Users\\jembo\\AppData\\Local\\Claude-Data\\claude_pzs8sxrjxfjjc\\Claude Extensions\\ant.dir.gh.blender.blender-mcp\\.venv\\Scripts\\blender-mcp.exe",
+      "args": [],
+      "env": {}
     }
   }
 }

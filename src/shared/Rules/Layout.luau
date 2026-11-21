@@ -1,19 +1,23 @@
 --!strict
--- Lays a whole route out in space: the station, each ride leg, and a straight "slot" for each stop,
--- joined into one continuous track that the cart follows by distance. Laid out (and carved) once per run.
--- A fork's slot takes the biggest footprint of its branches, so the track after it is the same
--- whichever branch wins the vote.
+-- Lays a whole route out in space from the cave kit: the station, each ride leg's rolled pieces, a stop
+-- chamber for each stop, and an end cap, joined into one continuous track the cart follows by distance.
+-- Every stop (fork or not) uses the same stop chamber, so the track after a fork doesn't depend on the vote.
 
-local Route = require("./Route")
+local Kit = require("./Kit")
 local Rng = require("./Rng")
+local Route = require("./Route")
 local Track = require("./Track")
 
--- kind is "Station", "Leg" or "Slot" (TRAPS #19). leg is 0 for the station.
+-- kind is "Station", "Leg", "Slot" or "Cap" (TRAPS #19). leg is 0 for the station.
 export type Segment = { kind: string, leg: number, from: number, to: number }
-export type Footprint = { length: number, drop: number }
+
+-- Where one kit piece goes: its track starts at `position` heading `heading`, `from` studs along the route.
+export type Placement = { piece: string, from: number, to: number, position: Track.Vec, heading: number }
+
 export type Layout = {
     track: Track.Track,
     segments: { Segment },
+    placements: { Placement },
     -- Where the cart halts for each leg's stop, by leg index.
     stops: { number },
     -- Where the cart waits at the station.
@@ -24,63 +28,66 @@ export type Spec = {
     Start: Track.Vec,
     Heading: number,
     Step: number,
-    StationLength: number,
-    CartStopOffset: number, -- studs into a slot where the cart halts
+    CartStopOffset: number, -- studs into a stop chamber where the cart halts
 }
-
--- Fields read from Config/Stages entries.
-type StageSpec = { Length: number, Drop: number }
 
 local Layout = {}
 
-function Layout.footprint(stop: Route.Stop, stages: { [string]: StageSpec }): Footprint
-    local length, drop = 0, 0
-    for _, id in Route.stagesOf(stop) do
-        length = math.max(length, stages[id].Length)
-        drop = math.max(drop, stages[id].Drop)
-    end
-    return { length = length, drop = drop }
+-- The layout settings every run uses, from the Run config. Server and clients both lay the route out from
+-- the run's seed with these, so they agree on where every piece (and every light) goes.
+function Layout.spec(run: any): Spec
+    return {
+        Start = { x = 0, y = run.StationHeight, z = 0 },
+        Heading = 0,
+        Step = run.Track.Step,
+        CartStopOffset = run.Track.CartStopOffset,
+    }
 end
 
-function Layout.build(route: Route.Route, zone: any, stages: { [string]: StageSpec }, spec: Spec): Layout
-    -- Its own random stream, so the track shape doesn't change when the route roll does.
+function Layout.build(route: Route.Route, kitSpec: Kit.Spec, pieces: Kit.Pieces, spec: Spec): Layout
+    -- Its own random stream, so the cave doesn't change when the route roll does.
     local rng = Rng.new(route.seed * 7 + 3)
-    local pieces: { Track.Track } = {}
-    local kinds: { { kind: string, leg: number } } = {}
-    local start, heading = spec.Start, spec.Heading
-
-    local function add(track: Track.Track, kind: string, leg: number)
-        table.insert(pieces, track)
-        table.insert(kinds, { kind = kind, leg = leg })
-        start = track.points[#track.points]
-        heading = track.endHeading
-    end
-
-    add(Track.straight(spec.StationLength, 0, start, heading, spec.Step), "Station", 0)
-    for _, leg in route.legs do
-        local legPieces = Track.pieces(rng, zone.Track, leg.rideLength, heading, spec.Heading)
-        add(Track.build(legPieces, start, heading, spec.Step), "Leg", leg.index)
-        local footprint = Layout.footprint(leg.stop, stages)
-        add(Track.straight(footprint.length, footprint.drop, start, heading, spec.Step), "Slot", leg.index)
-    end
-
+    local tracks: { Track.Track } = {}
+    local placements: { Placement } = {}
     local segments: { Segment } = {}
     local stops: { number } = {}
-    local offset = 0
-    for index, piece in pieces do
-        local segment = { kind = kinds[index].kind, leg = kinds[index].leg, from = offset, to = offset + piece.length }
-        table.insert(segments, segment)
-        if segment.kind == "Slot" then
-            stops[segment.leg] = segment.from + math.min(spec.CartStopOffset, piece.length)
-        end
-        offset += piece.length
+    local start, heading, offset = spec.Start, spec.Heading, 0
+
+    local function place(id: string): (number, number)
+        local track = Track.build({ Kit.trackPiece(pieces[id]) }, start, heading, spec.Step)
+        local from = offset
+        table.insert(tracks, track)
+        table.insert(
+            placements,
+            { piece = id, from = from, to = from + track.length, position = start, heading = heading }
+        )
+        offset += track.length
+        start = track.points[#track.points]
+        heading = track.endHeading
+        return from, offset
     end
 
+    local stationFrom, stationTo = place(kitSpec.Station)
+    table.insert(segments, { kind = "Station", leg = 0, from = stationFrom, to = stationTo })
+    for _, leg in route.legs do
+        local legFrom = offset
+        for _, id in Kit.leg(rng, pieces, kitSpec, leg.rideLength, heading, spec.Heading) do
+            place(id)
+        end
+        table.insert(segments, { kind = "Leg", leg = leg.index, from = legFrom, to = offset })
+        local slotFrom, slotTo = place(kitSpec.Stop)
+        table.insert(segments, { kind = "Slot", leg = leg.index, from = slotFrom, to = slotTo })
+        stops[leg.index] = slotFrom + spec.CartStopOffset
+    end
+    local capFrom, capTo = place(kitSpec.Cap)
+    table.insert(segments, { kind = "Cap", leg = #route.legs, from = capFrom, to = capTo })
+
     return {
-        track = Track.concat(pieces),
+        track = Track.concat(tracks),
         segments = segments,
+        placements = placements,
         stops = stops,
-        parked = spec.StationLength / 2,
+        parked = (stationFrom + stationTo) / 2,
     }
 end
 
@@ -102,6 +109,17 @@ function Layout.slot(layout: Layout, leg: number): Segment?
         end
     end
     return nil
+end
+
+-- The placements whose piece is of `kind` (for example every cavern, for the track dressing).
+function Layout.placementsOf(layout: Layout, pieces: Kit.Pieces, kind: string): { Placement }
+    local list = {}
+    for _, placement in layout.placements do
+        if pieces[placement.piece].Kind == kind then
+            table.insert(list, placement)
+        end
+    end
+    return list
 end
 
 return Layout

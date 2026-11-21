@@ -27,6 +27,12 @@ function TrackFrames.frame(track: Track.Track, distance: number, lookAhead: numb
     return CFrame.lookAt(position, position + direction.Unit)
 end
 
+-- The frame a cave kit piece is modeled in: its track's start, facing along the track (LookVector), upright.
+function TrackFrames.piece(position: Track.Vec, heading: number): CFrame
+    local start = TrackFrames.vector(position)
+    return CFrame.lookAt(start, start + Vector3.new(math.cos(heading), 0, math.sin(heading)))
+end
+
 -- Same as frame, but upright (no slope): for posts, signs and anything that should stand straight.
 function TrackFrames.flat(track: Track.Track, distance: number): CFrame
     local frame = TrackFrames.frame(track, distance)

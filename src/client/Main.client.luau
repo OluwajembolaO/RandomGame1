@@ -9,11 +9,15 @@ local React = require(ReplicatedStorage.Packages.React)
 local ReactRoblox = require(ReplicatedStorage.Packages.ReactRoblox)
 
 local App = require(script.Parent.UI.App)
+local CartFx = require(script.Parent.CartFx)
+local CaveLights = require(script.Parent.CaveLights)
 local Controls = require(script.Parent.Controls)
 local Fx = require(script.Parent.Fx)
 local Weapons = require(script.Parent.Weapons)
 
 Fx.start()
+CaveLights.start()
+CartFx.start()
 Controls.start()
 Weapons.start()
 

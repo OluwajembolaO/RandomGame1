@@ -1,6 +1,5 @@
 -- Every stop the cart can pull into. Each stage is a different genre with its own camera and controls.
--- Length and Drop are how far the placeholder arena runs along the track (TrackIn to TrackOut);
--- an authored arena's TrackIn/TrackOut markers win over these.
+-- Every stage is played in the cave kit's stop chamber (Config/KitData StopChamber).
 -- Not --!strict: stages have different fields (TRAPS #21). Tests check the data.
 
 return {
@@ -10,8 +9,6 @@ return {
         Kind = "Minigame",
         Blurb = "Hold the plates for each other. Everyone reaches the exit.",
         TimeLimit = 240,
-        Length = 180,
-        Drop = 12,
     },
 
     SignalRoom = {
@@ -24,8 +21,6 @@ return {
         Symbols = { "Gear", "Skull", "Gem", "Lamp", "Pick", "Bat", "Flame", "Key" },
         WrongCodeDamage = 30, -- cart HP
         WrongCodeCrawlers = 2,
-        Length = 90,
-        Drop = 0,
     },
 
     SupplyDepot = {
@@ -35,8 +30,6 @@ return {
         Blurb = "Patch up the crew and the cart.",
         Repair = 80,
         RestSeconds = 15,
-        Length = 70,
-        Drop = 0,
     },
 
     ForemanBoss = {
@@ -44,7 +37,5 @@ return {
         Genre = "FPS",
         Kind = "Boss",
         Blurb = "Hold both generators to drop its shield. Shoot.",
-        Length = 160,
-        Drop = 0,
     },
 }

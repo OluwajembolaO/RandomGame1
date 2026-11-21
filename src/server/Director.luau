@@ -6,8 +6,10 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CartService = require(script.Parent.CartService)
+local KitBuilder = require(script.Parent.KitBuilder)
 local Placeholders = require(script.Parent.Placeholders)
 local Survivors = require(script.Parent.Survivors)
+local TrackDresser = require(script.Parent.TrackDresser)
 local Weapons = require(script.Parent.Weapons)
 local World = require(script.Parent.World)
 
@@ -57,17 +59,6 @@ local function rollSeed(): number
     return if run.Seed ~= 0 then run.Seed else Random.new():NextInteger(1, 2147483646)
 end
 
-local function layoutSpec(): Layout.Spec
-    local track = run.Track
-    return {
-        Start = { x = 0, y = run.StationHeight, z = 0 },
-        Heading = 0,
-        Step = track.Step,
-        StationLength = track.StationLength,
-        CartStopOffset = track.CartStopOffset,
-    }
-end
-
 local function waitForLever(lever: ProximityPrompt)
     local pulled = false
     local connection = lever.Triggered:Connect(function()
@@ -108,19 +99,24 @@ local function runOnce()
     local route = Route.generate(zone, seed)
     local ok, problem = Route.validate(route, Configs.Stages)
     assert(ok, "bad route: " .. tostring(problem))
-    local layout = Layout.build(route, zone, Configs.Stages, layoutSpec())
+    local layout = Layout.build(route, zone.Kit, Configs.Kit.Pieces, Layout.spec(run))
 
     RunInfo.set("Seed", seed)
+    RunInfo.set("CaveSeed", 0) -- set to the seed once the cave is built
     RunInfo.set("Zone", zone.Name)
     RunInfo.set("Legs", #route.legs)
     RunInfo.set("Leg", 0)
     RunInfo.set("Stop", "")
     RunInfo.set("StopGenre", "")
+    World.mood(zone)
     message("Digging out the mine...")
-    World.carve(layout, zone.Palette)
-    World.dress(layout, zone.Palette, folder)
-    local stationFloor, stationSize = World.chamber(layout, layout.segments[1])
-    local station = Placeholders.station(folder, stationFloor, stationSize, zone.Palette)
+    KitBuilder.build(layout, zone, folder)
+    -- Clients light the cave themselves from the same layout (CaveLights; TRAPS #42).
+    RunInfo.set("CaveSeed", seed)
+    message("Laying the rails...")
+    TrackDresser.dress(layout, zone, folder)
+    local stationFloor, stationLength = World.chamber(layout, layout.segments[1])
+    local station = Placeholders.station(folder, stationFloor, stationLength, zone.Palette)
     Survivors.setSpawn(station.spawn)
 
     local owned: Upgrades.Owned = {}
@@ -158,8 +154,8 @@ local function runOnce()
         local stage = Configs.Stages[stageId]
         local slot = Layout.slot(layout, leg.index)
         assert(slot, "no slot for leg " .. leg.index)
-        local floor, size = World.chamber(layout, slot)
-        local arena = Placeholders.arena(folder, floor, size, stageId, zone.Palette)
+        local floor, length = World.chamber(layout, slot)
+        local arena = Placeholders.arena(folder, floor, length, stageId)
         RunInfo.set("Stop", stage.Name)
         RunInfo.set("StopGenre", stage.Genre)
         CartService.unseatAll()

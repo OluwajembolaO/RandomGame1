@@ -79,6 +79,20 @@ Rules learned the hard way. Each one says what broke, the rule, and why. Add one
 
 30. **Studio's MCP has no 2D image generation.** `upload_image` only uploads images you already have.
 
+38. **`screen_capture` needs Studio's window in front during play.** With Studio behind VS Code, playtest captures came back half-drawn (a stale frame over the sky) or solid black, HUD included, while the game itself was fine. Check state with `execute_luau` (Client) first, and ask for Studio to be brought forward before judging visuals.
+
+39. **The Studio importer drops plain material colors, and GLB arrives rotated 180°.** The Blender cart arrived default grey with its front at +Z. Set colors and materials in Studio, and turn the model around its pivot. Keep "Set Pivot to Scene Origin" ticked so the pivot is the Blender origin. Roblox materials still showed texture detail on the MeshParts.
+
+41. **Never rewrite a light's `Enabled` when it hasn't changed.** The client's distance culling set `Enabled` on all ~750 kit lights every 0.4 s, even to the same value, and the whole cave rendered black (crystals glowed, nothing was lit). With the loop stopped, 1, 12, 32 and 64 lights all lit the station normally, and so did per-frame `Brightness` changes for flicker and pulse. Compare before writing.
+
+42. **Server-made lights on Attachments don't light anything on the client until the client writes a property.** Every kit light rendered as nothing on a fresh playtest (the cave was black, Neon still glowed) even though the client had them enabled, in range and correctly placed. Toggling `Enabled` off and on once from the client lit everything at once, and no other change (lighting values, light count, an extra light) did. Doing that toggle automatically 0.4 s after the lights arrived was too early and didn't help. Client-made lights that started enabled were black too, so it isn't about replication. What matters is that the light's first change happens with the camera nearby: lights created and enabled during the cave build, before the character spawned there, never lit. The fix: clients make every cave and cart light (`client/CaveLights` from `RunInfo.CaveSeed`, and `client/CartFx`), each starting `Enabled = false`. `Fx` distance culling switches each one on when the camera comes within range.
+
+40. **`rojo syncback` asks for confirmation and writes default-value noise.** Use `-y`, and list noisy properties (`ExplorerIconContent`, `SerializedOverrides`) under `syncbackRules.ignoreProperties` in `content.project.json`. While `rojo serve` is connected, the synced `.rbxm` also appears in Studio next to the original, so delete the duplicate.
+
+## Blender MCP
+
+37. **Use one Blender MCP add-on only.** The official Blender Lab extension (`lab_blender_org/mcp`, paired with Claude Desktop's Blender extension) and the third-party `mcp-for-blender` add-on both listen on port 9876. Whichever binds first wins, and the other server connects to the wrong add-on and hangs on its first command (`get_addon_info`), so Claude Code reports a 30s connect timeout. This project uses the official one: `.mcp.json` runs Claude Desktop's `blender-mcp.exe` from its extension venv. If Claude Desktop updates that extension and the path changes, update `.mcp.json`.
+
 ## Git
 
 31. **Pin LF line endings in `.gitattributes`.** With `core.autocrlf` on Windows, Git would check files out as CRLF, and `stylua --check` (`line_endings = "Unix"`) would fail on every fresh clone.

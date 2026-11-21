@@ -1,5 +1,6 @@
 --!strict
--- The cart on plain numbers: hit points, speed and the brake. CartService applies these to the real cart.
+-- The cart on plain numbers: hit points, speed (with momentum: faster downhill, slower through bends),
+-- the brake, and how far it leans in a bend. CartService applies these to the real cart.
 
 export type Stats = {
     MaxHp: number,
@@ -12,6 +13,11 @@ export type Stats = {
     SharpDamagePerSecond: number,
     RepairPerSecond: number,
     ChewArmor: number,
+    SlopeBoost: number, -- extra cruising speed per unit of downhill grade (x Speed)
+    CurveDrag: number, -- speed lost per radian-per-stud of curvature (as a fraction)
+    CurveDragMax: number, -- the most a bend can slow the cart (as a fraction)
+    BankPerAccel: number, -- degrees of lean per stud/s^2 of sideways pull
+    MaxBank: number, -- degrees
 }
 
 export type Cart = { hp: number, speed: number, brakeLeft: number, brakeCooldown: number }
@@ -22,6 +28,8 @@ export type Conditions = {
     sharp: boolean, -- inside a sharp curve
     chewers: number, -- crawlers on the cart
     chewDps: number,
+    grade: number?, -- the track's downhill grade here (Track.shapeAt)
+    curvature: number?, -- the track's curvature here, positive turning right
 }
 
 local Cart = {}
@@ -39,6 +47,11 @@ function Cart.stats(config: any, upgraded: { [string]: number }): Stats
         SharpDamagePerSecond = config.SharpDamagePerSecond,
         RepairPerSecond = config.RepairPerSecond,
         ChewArmor = upgraded.ChewArmor,
+        SlopeBoost = config.SlopeBoost,
+        CurveDrag = config.CurveDrag,
+        CurveDragMax = config.CurveDragMax,
+        BankPerAccel = config.BankPerAccel,
+        MaxBank = config.MaxBank,
     }
 end
 
@@ -59,11 +72,25 @@ function Cart.pullBrake(cart: Cart, stats: Stats): boolean
     return true
 end
 
-function Cart.targetSpeed(cart: Cart, stats: Stats, moving: boolean): number
+-- The speed the cart is heading for: it runs faster down steeper track and loses some speed in bends;
+-- the brake overrides both.
+function Cart.targetSpeed(cart: Cart, stats: Stats, moving: boolean, grade: number?, curvature: number?): number
     if not moving then
         return 0
     end
-    return if cart.brakeLeft > 0 then stats.Speed * stats.BrakeFactor else stats.Speed
+    if cart.brakeLeft > 0 then
+        return stats.Speed * stats.BrakeFactor
+    end
+    local slope = 1 + stats.SlopeBoost * math.max(0, grade or 0)
+    local drag = 1 - math.min(stats.CurveDragMax, stats.CurveDrag * math.abs(curvature or 0))
+    return stats.Speed * slope * drag
+end
+
+-- How far the cart body leans in a bend, in radians: outward, harder the faster it takes the bend.
+-- Positive for right-hand bends (the top tips left).
+function Cart.bank(stats: Stats, speed: number, curvature: number): number
+    local sideways = speed * speed * curvature
+    return math.rad(math.clamp(sideways * stats.BankPerAccel, -stats.MaxBank, stats.MaxBank))
 end
 
 function Cart.damage(cart: Cart, amount: number)
@@ -89,9 +116,10 @@ function Cart.step(cart: Cart, stats: Stats, dt: number, conditions: Conditions)
         cart.brakeCooldown = math.max(0, cart.brakeCooldown - dt)
     end
 
-    -- Brakes bite twice as hard as the cart accelerates.
-    local target = Cart.targetSpeed(cart, stats, conditions.moving)
-    cart.speed += math.clamp(target - cart.speed, -stats.Accel * 2 * dt, stats.Accel * dt)
+    -- Brakes bite twice as hard as the cart accelerates; coasting down to a lower speed is gentler.
+    local target = Cart.targetSpeed(cart, stats, conditions.moving, conditions.grade, conditions.curvature)
+    local slowing = if cart.brakeLeft > 0 then stats.Accel * 2 else stats.Accel * 0.8
+    cart.speed += math.clamp(target - cart.speed, -slowing * dt, stats.Accel * dt)
 
     local damage = 0
     if conditions.sharp and cart.speed > stats.SafeCurveSpeed then

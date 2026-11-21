@@ -1,6 +1,7 @@
 --!strict
--- Part-built stand-ins for content that hasn't been built in Studio yet, so every stop is playable
--- before any MCP content exists. Floors sit just under the rails (rail tops are at the floor CFrame).
+-- What the game adds to the kit's station and stop chamber until each stop's own content is built: an
+-- invisible walkable floor matching the kit's floor (Run.Track.FloorTop and Floors), the start lever, a sign
+-- and spawn points. The kit pieces bring the look and the lanterns.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -9,23 +10,31 @@ local World = require(script.Parent.World)
 local Shared = ReplicatedStorage.Shared
 local Configs = require(Shared.Configs)
 
+local trackConfig = Configs.Run.Track
+
 local Placeholders = {}
 
 export type Station = { model: Model, spawn: CFrame, lever: ProximityPrompt }
 export type Arena = { model: Model, spawn: CFrame }
 
-local function floorSlab(model: Model, floor: CFrame, size: Vector3, palette: any): Part
+-- `floor` is rail height at the middle of the room, facing along the track; floors sit FloorTop below it.
+local function walkable(model: Model, floor: CFrame, length: number, kind: string)
+    local spec = trackConfig.Floors[kind]
     local slab = World.part(
         model,
         "Floor",
-        Vector3.new(size.X, 1, size.Z),
-        floor * CFrame.new(0, -0.7, 0),
-        World.color(palette.RockDark),
-        Enum.Material.Slate
+        Vector3.new(spec.Width, 1, length - 8),
+        floor * CFrame.new(spec.Offset, trackConfig.FloorTop - 0.5, 0),
+        Color3.new(),
+        Enum.Material.SmoothPlastic
     )
+    slab.Transparency = 1
     slab.CanCollide = true
     slab.CanQuery = true
-    return slab
+end
+
+local function standing(floor: CFrame, x: number, z: number): CFrame
+    return floor * CFrame.new(x, trackConfig.FloorTop + 3, z)
 end
 
 local function sign(model: Model, at: CFrame, title: string, subtitle: string)
@@ -54,35 +63,18 @@ local function sign(model: Model, at: CFrame, title: string, subtitle: string)
     small.Parent = gui
 end
 
-local function lights(model: Model, floor: CFrame, size: Vector3, palette: any)
-    local lamp = World.color(palette.Lamp)
-    for _, x in { -0.35, 0.35 } do
-        for _, z in { -0.3, 0.3 } do
-            local bulb = World.part(
-                model,
-                "Lamp",
-                Vector3.new(1, 1, 1),
-                floor * CFrame.new(size.X * x, 14, size.Z * z),
-                lamp,
-                Enum.Material.Neon
-            )
-            World.light(bulb, 40, 1.6, lamp, true)
-        end
-    end
-end
-
--- The station: a lit platform around the parked cart, with the lever that starts the run.
-function Placeholders.station(parent: Instance, floor: CFrame, size: Vector3, palette: any): Station
+-- The station: a floor around the parked cart and the lever that starts the run.
+function Placeholders.station(parent: Instance, floor: CFrame, length: number, palette: any): Station
     local model = Instance.new("Model")
     model.Name = "Station"
-    floorSlab(model, floor, size, palette)
-    lights(model, floor, size, palette)
+    walkable(model, floor, length, "Station")
 
+    local base = trackConfig.FloorTop
     local post = World.part(
         model,
         "LeverPost",
         Vector3.new(1, 4, 1),
-        floor * CFrame.new(7, 2, -2),
+        floor * CFrame.new(7, base + 2, -2),
         World.color(palette.Timber),
         Enum.Material.Wood
     )
@@ -91,7 +83,7 @@ function Placeholders.station(parent: Instance, floor: CFrame, size: Vector3, pa
         model,
         "LeverHandle",
         Vector3.new(0.4, 2.5, 0.4),
-        floor * CFrame.new(7, 4.6, -2) * CFrame.Angles(0, 0, math.rad(25)),
+        floor * CFrame.new(7, base + 4.6, -2) * CFrame.Angles(0, 0, math.rad(25)),
         Color3.fromRGB(190, 40, 40),
         Enum.Material.Metal
     )
@@ -104,21 +96,20 @@ function Placeholders.station(parent: Instance, floor: CFrame, size: Vector3, pa
     lever.RequiresLineOfSight = false
     lever.Parent = post
 
-    sign(model, floor * CFrame.new(0, 16, -size.Z / 2 + 6), "LAST CART DOWN", "Pull the lever when the crew is ready")
+    sign(model, floor * CFrame.new(10, 18, -length / 2 + 8), "LAST CART DOWN", "Pull the lever when the crew is ready")
     model.Parent = parent
-    return { model = model, spawn = floor * CFrame.new(14, 4, 6), lever = lever }
+    return { model = model, spawn = standing(floor, 14, 6), lever = lever }
 end
 
--- A stop that hasn't been built yet: a lit, empty chamber with the stage's name on a sign.
-function Placeholders.arena(parent: Instance, floor: CFrame, size: Vector3, stageId: string, palette: any): Arena
+-- A stop that hasn't been built yet: the chamber's floor and the stage's name on a sign.
+function Placeholders.arena(parent: Instance, floor: CFrame, length: number, stageId: string): Arena
     local stage = Configs.Stages[stageId]
     local model = Instance.new("Model")
     model.Name = stageId
-    floorSlab(model, floor, size, palette)
-    lights(model, floor, size, palette)
-    sign(model, floor * CFrame.new(0, 16, 0), stage.Name, stage.Genre .. " stage (placeholder)")
+    walkable(model, floor, length, "Stop")
+    sign(model, floor * CFrame.new(8, 20, 0), stage.Name, stage.Genre .. " stage (placeholder)")
     model.Parent = parent
-    return { model = model, spawn = floor * CFrame.new(12, 4, 0) }
+    return { model = model, spawn = standing(floor, 14, 0) }
 end
 
 return Placeholders

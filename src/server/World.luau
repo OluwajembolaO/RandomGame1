@@ -1,21 +1,16 @@
 --!strict
--- The cave for one run. Carves terrain for the station, the tunnels and each stop's chamber, then lays
--- rails, ballast, timber supports and lanterns along the track. Everything else lives under workspace.Run.
--- Terrain is filled for every piece first and carved second, so a neighbour never refills a space
--- that was already dug out.
+-- Shared building helpers for one run's world, plus the zone's mood (fog, bloom, color grading).
+-- KitBuilder places the cave and TrackDresser lays the track; everything lives under workspace.Run.
 
+local CollectionService = game:GetService("CollectionService")
+local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage.Shared
-local Configs = require(Shared.Configs)
 local Layout = require(Shared.Rules.Layout)
 local TrackFrames = require(Shared.TrackFrames)
 
 local Terrain = workspace.Terrain
-local trackConfig = Configs.Run.Track
-local ROCK = Enum.Material.Slate
-local TERRAIN_BATCH = 24 -- terrain writes per frame, so building doesn't stall the server
-local CARVE_SPACING = 8
 
 local World = {}
 
@@ -59,6 +54,29 @@ function World.light(parent: Instance, range: number, brightness: number, color:
     return light
 end
 
+-- Marks a light as a flame; clients make it waver by `amount` (a fraction of its brightness).
+function World.flicker(light: Light, amount: number)
+    light:SetAttribute("Base", light.Brightness)
+    light:SetAttribute("Flicker", amount)
+    CollectionService:AddTag(light, "Flicker")
+end
+
+-- A small glowing lantern with a flickering light.
+function World.lantern(parent: Instance, at: CFrame, palette: any, mood: any, range: number): Part
+    local lamp = World.color(palette.Lamp)
+    World.part(
+        parent,
+        "LanternCap",
+        Vector3.new(1.1, 0.3, 1.1),
+        at * CFrame.new(0, 0.75, 0),
+        Color3.fromRGB(40, 36, 32),
+        Enum.Material.Metal
+    )
+    local glass = World.part(parent, "Lantern", Vector3.new(0.8, 1.2, 0.8), at, lamp, Enum.Material.Neon)
+    World.flicker(World.light(glass, range, 2.4, lamp, false), mood.Flicker)
+    return glass
+end
+
 -- Clears the last run's cave and parts, and returns a fresh workspace.Run folder.
 function World.reset(): Folder
     Terrain:Clear()
@@ -72,160 +90,53 @@ function World.reset(): Folder
     return folder
 end
 
--- A station or slot chamber: its floor CFrame (rail height at the middle, facing along the track and
--- tilted with it) and its size.
-function World.chamber(layout: Layout.Layout, segment: Layout.Segment): (CFrame, Vector3)
+-- A station or stop chamber: rail height at its middle, facing along the track (it's flat and straight),
+-- and its length.
+function World.chamber(layout: Layout.Layout, segment: Layout.Segment): (CFrame, number)
     local a = TrackFrames.position(layout.track, segment.from)
     local b = TrackFrames.position(layout.track, segment.to)
-    local floor = CFrame.lookAt((a + b) / 2, b)
-    return floor, Vector3.new(trackConfig.ChamberWidth, trackConfig.ChamberHeight, (b - a).Magnitude + 16)
+    return CFrame.lookAt((a + b) / 2, b), (b - a).Magnitude
 end
 
-local function runBatched(jobs: { () -> () })
-    for index, job in jobs do
-        job()
-        if index % TERRAIN_BATCH == 0 then
-            task.wait()
-        end
+local function effect(className: string, name: string): Instance
+    local existing = Lighting:FindFirstChild(name)
+    if existing and existing.ClassName == className then
+        return existing
     end
+    if existing then
+        existing:Destroy()
+    end
+    local created = Instance.new(className)
+    created.Name = name
+    created.Parent = Lighting
+    return created
 end
 
--- Digs the whole route out of solid rock. Yields while it works.
-function World.carve(layout: Layout.Layout, palette: any)
-    Terrain:SetMaterialColor(ROCK, World.color(palette.Rock))
-    local radius = trackConfig.TunnelRadius
-    -- The tube's center sits above the rails so its floor lands just under the ballast.
-    local lift = Vector3.new(0, radius - 3, 0)
-    local fills: { () -> () } = {}
-    local carves: { () -> () } = {}
-    for _, segment in layout.segments do
-        if segment.kind == "Leg" then
-            local distance = segment.from
-            while distance <= segment.to do
-                local center = TrackFrames.position(layout.track, distance) + lift
-                table.insert(fills, function()
-                    Terrain:FillBall(center, radius + 6, ROCK)
-                end)
-                table.insert(carves, function()
-                    Terrain:FillBall(center, radius, Enum.Material.Air)
-                end)
-                distance += CARVE_SPACING
-            end
-        else
-            local floor, size = World.chamber(layout, segment)
-            local middle = floor * CFrame.new(0, size.Y / 2 - 3, 0)
-            table.insert(fills, function()
-                Terrain:FillBlock(middle, size + Vector3.new(14, 14, 14), ROCK)
-            end)
-            table.insert(carves, function()
-                Terrain:FillBlock(middle, size, Enum.Material.Air)
-            end)
-        end
-    end
-    runBatched(fills)
-    runBatched(carves)
-end
+-- The zone's lighting mood: ambient light, fog that swallows the distance, bloom on the flames, and a
+-- color grade. Lighting.Technology (Future) is set in default.project.json; scripts can't (TRAPS #12).
+function World.mood(zone: any)
+    local mood = zone.Mood
+    Lighting.Ambient = World.color(mood.Ambient)
+    Lighting.ExposureCompensation = mood.Exposure or 0
 
--- Rails, ballast and sleepers along the whole track; timber supports with lanterns along the legs.
-function World.dress(layout: Layout.Layout, palette: any, parent: Instance)
-    local folder = Instance.new("Folder")
-    folder.Name = "Track"
-    folder.Parent = parent
+    local atmosphere = effect("Atmosphere", "CaveAtmosphere") :: Atmosphere
+    atmosphere.Density = mood.Atmosphere.Density
+    atmosphere.Offset = mood.Atmosphere.Offset
+    atmosphere.Color = World.color(mood.Atmosphere.Color)
+    atmosphere.Decay = World.color(mood.Atmosphere.Decay)
+    atmosphere.Glare = 0
+    atmosphere.Haze = mood.Atmosphere.Haze
 
-    local gauge = trackConfig.RailGauge
-    local railColor = World.color(palette.Rail)
-    local ballastColor = World.color(palette.RockDark)
-    local timber = World.color(palette.Timber)
-    local lamp = World.color(palette.Lamp)
-    local track = layout.track
-    local points = track.points
+    local bloom = effect("BloomEffect", "CaveBloom") :: BloomEffect
+    bloom.Intensity = mood.Bloom.Intensity
+    bloom.Size = mood.Bloom.Size
+    bloom.Threshold = mood.Bloom.Threshold
 
-    -- Straight runs of points share one rail part each.
-    local i = 1
-    while i < #points do
-        local a = TrackFrames.vector(points[i])
-        local direction = (TrackFrames.vector(points[i + 1]) - a).Unit
-        local j = i + 1
-        while
-            j < #points
-            and (TrackFrames.vector(points[j + 1]) - TrackFrames.vector(points[j])).Unit:Dot(direction) > 0.99995
-        do
-            j += 1
-        end
-        local b = TrackFrames.vector(points[j])
-        local length = (b - a).Magnitude
-        local frame = CFrame.lookAt((a + b) / 2, b)
-        for _, side in { -1, 1 } do
-            World.part(
-                folder,
-                "Rail",
-                Vector3.new(0.35, 0.4, length + 0.25),
-                frame * CFrame.new(side * gauge / 2, -0.2, 0),
-                railColor,
-                Enum.Material.Metal
-            )
-        end
-        World.part(
-            folder,
-            "Ballast",
-            Vector3.new(gauge + 4, 3, length + 0.5),
-            frame * CFrame.new(0, -2, 0),
-            ballastColor,
-            Enum.Material.Slate
-        )
-        i = j
-    end
-
-    local distance = 0
-    while distance <= track.length do
-        World.part(
-            folder,
-            "Sleeper",
-            Vector3.new(gauge + 2, 0.35, 1.2),
-            TrackFrames.frame(track, distance) * CFrame.new(0, -0.55, 0),
-            timber,
-            Enum.Material.Wood
-        )
-        distance += 8
-    end
-
-    for _, segment in layout.segments do
-        if segment.kind == "Leg" then
-            local at = segment.from + trackConfig.SupportEvery / 2
-            while at < segment.to do
-                local frame = TrackFrames.flat(track, at)
-                local half = gauge / 2 + 4.5
-                for _, side in { -1, 1 } do
-                    World.part(
-                        folder,
-                        "Post",
-                        Vector3.new(1, 12, 1),
-                        frame * CFrame.new(side * half, 5.5, 0),
-                        timber,
-                        Enum.Material.Wood
-                    )
-                end
-                World.part(
-                    folder,
-                    "Beam",
-                    Vector3.new(half * 2 + 1, 1, 1),
-                    frame * CFrame.new(0, 11.5, 0),
-                    timber,
-                    Enum.Material.Wood
-                )
-                local lantern = World.part(
-                    folder,
-                    "Lantern",
-                    Vector3.new(0.8, 1.2, 0.8),
-                    frame * CFrame.new(half - 1.5, 10.4, 0),
-                    lamp,
-                    Enum.Material.Neon
-                )
-                World.light(lantern, 22, 1.4, lamp, false)
-                at += trackConfig.SupportEvery
-            end
-        end
-    end
+    local grade = effect("ColorCorrectionEffect", "CaveGrade") :: ColorCorrectionEffect
+    grade.Brightness = mood.Grade.Brightness
+    grade.Contrast = mood.Grade.Contrast
+    grade.Saturation = mood.Grade.Saturation
+    grade.TintColor = World.color(mood.Grade.Tint)
 end
 
 return World

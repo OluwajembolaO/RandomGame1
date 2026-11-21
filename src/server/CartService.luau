@@ -6,6 +6,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ServerStorage = game:GetService("ServerStorage")
 
 local Groups = require(script.Parent.Groups)
 local World = require(script.Parent.World)
@@ -47,6 +48,7 @@ local arrived = Instance.new("BindableEvent")
 local sinceReplicate = 0
 local sinceReseat = 0
 local sinceShake = 0
+local bank = 0 -- the cart body's current lean (radians), eased toward Cart.bank
 
 local function claimOwnership()
     local part = root
@@ -62,8 +64,98 @@ local function riderOf(seat: Seat): Player?
     return if occupant and occupant.Parent then Players:GetPlayerFromCharacter(occupant.Parent) else nil
 end
 
--- Builds the part-built cart around a root at rail height. Forward is -Z (the root's LookVector).
-local function build(palette: any): (Model, BasePart, { Seat })
+-- Where the Blender cart's riders sit, in its root's space: two benches (front at -Z), two riders each.
+-- Bench tops are 3.36 studs above the rails (art/blender/build_cart.py SEAT_TOP and BENCH_Y).
+local MESH_SEATS = {
+    Vector3.new(-1.3, 3.26, -2.2),
+    Vector3.new(1.3, 3.26, -2.2),
+    Vector3.new(-1.3, 3.26, 2.3),
+    Vector3.new(1.3, 3.26, 2.3),
+}
+-- The brake lever swings about this point (build_cart.py PIVOT, in Roblox axes).
+local LEVER_PIVOT = Vector3.new(3.42, 2.75, 0.6)
+
+-- A joint the client can animate (Motor6D.Transform) that turns `part` about the root's X axis through `pivot`.
+local function motor(base: BasePart, part: BasePart, pivot: Vector3)
+    local joint = CFrame.new(pivot) * base.CFrame.Rotation
+    local motor6d = Instance.new("Motor6D")
+    motor6d.Name = part.Name .. "Motor"
+    motor6d.Part0 = base
+    motor6d.Part1 = part
+    motor6d.C0 = base.CFrame:ToObjectSpace(joint)
+    motor6d.C1 = part.CFrame:ToObjectSpace(joint)
+    motor6d.Parent = base
+end
+
+local function attach(base: BasePart, part: BasePart)
+    local joint = Instance.new("WeldConstraint")
+    joint.Part0 = base
+    joint.Part1 = part
+    joint.Parent = part
+end
+
+-- The Blender-made cart from ServerStorage.Content.Cart (assets/Content/Cart.rbxm), if it's there.
+local function contentCart(): Model?
+    local content = ServerStorage:FindFirstChild("Content")
+    local cart = content and content:FindFirstChild("Cart")
+    if cart and cart:IsA("Model") and cart.PrimaryPart then
+        return cart
+    end
+    return nil
+end
+
+-- Rigs a copy of the Blender cart: wheels and brake lever on motors the client animates, everything else
+-- welded to the root, seats on the benches, the headlamp beam and a flickering lantern.
+local function buildFromContent(template: Model): (Model, BasePart, { Seat })
+    local cart = template:Clone()
+    cart.Name = "Cart"
+    local base = cart.PrimaryPart :: BasePart
+    base.Anchored = false
+    base.RootPriority = 127
+    local rootFrame = base.CFrame
+
+    for _, part in cart:GetDescendants() do
+        if part:IsA("BasePart") and part ~= base then
+            part.Anchored = false
+            part.Massless = true
+            if part.Name:match("^Wheel_") then
+                motor(base, part, part.Position)
+            elseif part.Name == "BrakeLever" then
+                motor(base, part, rootFrame:PointToWorldSpace(LEVER_PIVOT))
+            elseif part.Name ~= "BrakeGrip" then
+                attach(base, part)
+            end
+        end
+    end
+    local lever, grip = cart:FindFirstChild("BrakeLever"), cart:FindFirstChild("BrakeGrip")
+    if lever and grip and lever:IsA("BasePart") and grip:IsA("BasePart") then
+        attach(lever, grip)
+    elseif grip and grip:IsA("BasePart") then
+        attach(base, grip)
+    end
+
+    -- The headlamp beam and the lantern's light are made by each client (client/CartFx; TRAPS #42).
+
+    local list: { Seat } = {}
+    for index = 1, Configs.Run.Cart.Seats do
+        local seat = Instance.new("Seat")
+        seat.Name = "Seat" .. index
+        seat.Size = Vector3.new(1.8, 0.2, 1.2)
+        seat.CFrame = rootFrame * CFrame.new(MESH_SEATS[(index - 1) % #MESH_SEATS + 1])
+        seat.Transparency = 1
+        seat.CanCollide = false
+        seat.Massless = true
+        seat.Parent = cart
+        attach(base, seat)
+        table.insert(list, seat)
+    end
+
+    Groups.assign(cart, Groups.Cart)
+    return cart, base, list
+end
+
+-- Builds the part-built stand-in cart around a root at rail height. Forward is -Z (the root's LookVector).
+local function buildPlaceholder(palette: any): (Model, BasePart, { Seat })
     local cart = Instance.new("Model")
     cart.Name = "Cart"
     local base = Instance.new("Part")
@@ -167,6 +259,14 @@ local function build(palette: any): (Model, BasePart, { Seat })
     return cart, base, list
 end
 
+local function build(palette: any): (Model, BasePart, { Seat })
+    local template = contentCart()
+    if template then
+        return buildFromContent(template)
+    end
+    return buildPlaceholder(palette)
+end
+
 local function pose()
     local current = track
     if not current or not alignPosition or not alignOrientation then
@@ -174,7 +274,8 @@ local function pose()
     end
     local frame = TrackFrames.frame(current, distance)
     alignPosition.Position = frame.Position
-    alignOrientation.CFrame = frame.Rotation
+    -- Lean about the rails' line, so the cart tips onto its outer wheels in a bend.
+    alignOrientation.CFrame = frame.Rotation * CFrame.Angles(0, 0, bank)
 end
 
 local function setRiding(player: Player, riding: boolean)
@@ -199,6 +300,7 @@ function CartService.spawn(
     rolling = false
     locked = false
     chewers = 0
+    bank = 0
 
     -- Pivot onto the track before parenting, so the unanchored parts never fall from the origin.
     local cart, base, list = build(palette)
@@ -392,12 +494,16 @@ RunService.Heartbeat:Connect(function(dt)
     end
     local remaining = target - distance
     local moving = rolling and remaining > 0
+    local grade, curvature = Track.shapeAt(current, distance)
     local damage = Cart.step(state, stats, dt, {
         moving = moving,
         sharp = Track.sharpAt(current, distance),
         chewers = chewers,
         chewDps = chewDps,
+        grade = grade,
+        curvature = curvature,
     })
+    bank += (Cart.bank(stats, state.speed, curvature) - bank) * math.min(1, dt * 4)
     sinceShake += dt
     if damage > 0 and sinceShake >= SHAKE_EVERY and Track.sharpAt(current, distance) then
         sinceShake = 0

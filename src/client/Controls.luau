@@ -1,5 +1,6 @@
 --!strict
--- Riding controls. While the server marks you as Riding, jumping is off (so you can't hop out of the
+-- The camera and riding controls. The game is played in first person, and the camera always follows
+-- your own character. While the server marks you as Riding, jumping is off (so you can't hop out of the
 -- cart) and the brake is bound to F / gamepad X / an on-screen button.
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -36,12 +37,26 @@ local function apply()
     end
 end
 
+-- First person, following this character. StarterPlayer.CameraMode is set in default.project.json too;
+-- setting it here also covers a camera something else left detached (Scriptable, or aimed at nothing).
+local function followCharacter()
+    player.CameraMode = Enum.CameraMode.LockFirstPerson
+    local camera = workspace.CurrentCamera
+    local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        camera.CameraType = Enum.CameraType.Custom
+        camera.CameraSubject = humanoid
+    end
+end
+
 function Controls.start()
     player:GetAttributeChangedSignal("Riding"):Connect(apply)
     player.CharacterAdded:Connect(function(character)
         character:WaitForChild("Humanoid")
+        followCharacter()
         apply()
     end)
+    followCharacter()
     apply()
 end
 

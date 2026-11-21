@@ -1,5 +1,11 @@
 {
   "name": "RandomGame1Content",
+  "syncbackRules": {
+    "ignoreProperties": {
+      "ServerStorage": ["ExplorerIconContent", "SerializedOverrides"],
+      "Folder": ["ExplorerIconContent", "SerializedOverrides"]
+    }
+  },
   "tree": {
     "$className": "DataModel",
 

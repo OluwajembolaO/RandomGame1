@@ -1,9 +1,7 @@
 --!strict
 -- Track geometry on plain numbers, so Lune can test it. Pieces (straights and curves, always sloping
--- down) are rolled from a seed, then sampled into points the cart follows by distance.
+-- down; the cave kit's, see Rules/Kit) are sampled into points the cart follows by distance.
 -- Headings are radians in the XZ plane: direction = (cos h, 0, sin h). Server code turns points into CFrames.
-
-local Rng = require("./Rng")
 
 export type Vec = { x: number, y: number, z: number }
 -- kind is "Straight" or "Curve" (string literal unions widen across modules; TRAPS #19).
@@ -18,77 +16,9 @@ export type Track = {
     endHeading: number,
 }
 
--- Fields read from a zone's Track config.
-export type Spec = {
-    Grade: { number },
-    StraightLength: { number },
-    CurveLength: { number },
-    CurveTurn: { number },
-    SharpEvery: number,
-    SharpLength: { number },
-    SharpTurn: { number },
-    MaxHeading: number,
-}
-
 export type Rules = { MaxStep: number, MinY: number, BaseHeading: number }
 
 local Track = {}
-
--- Rolls pieces totalling `length` horizontal studs, starting at `heading`. Curves always turn so the
--- heading stays within baseHeading +/- MaxHeading (under 90 degrees), so the track keeps moving forward
--- along the zone and can't cross itself. Every SharpEvery-th curve is a sharp one.
-function Track.pieces(rng: Rng.Rng, spec: Spec, length: number, heading: number, baseHeading: number): { Piece }
-    local pieces: { Piece } = {}
-    local total = 0
-    local curves = 0
-    local curveNext = false
-    while total < length - 1e-6 do
-        local piece: Piece
-        local grade = Rng.range(rng, spec.Grade[1], spec.Grade[2])
-        if curveNext then
-            curves += 1
-            local sharp = curves % spec.SharpEvery == 0
-            local lengths = if sharp then spec.SharpLength else spec.CurveLength
-            local turns = if sharp then spec.SharpTurn else spec.CurveTurn
-            local size = Rng.range(rng, turns[1], turns[2])
-            local relative = heading - baseHeading
-            local canLeft = relative - size >= -spec.MaxHeading
-            local canRight = relative + size <= spec.MaxHeading
-            local sign = -1
-            if canLeft and canRight then
-                sign = if Rng.float(rng) < 0.5 then -1 else 1
-            elseif canRight then
-                sign = 1
-            end
-            piece = {
-                kind = "Curve",
-                length = Rng.range(rng, lengths[1], lengths[2]),
-                turn = sign * size,
-                grade = grade,
-                sharp = sharp,
-            }
-        else
-            piece = {
-                kind = "Straight",
-                length = Rng.range(rng, spec.StraightLength[1], spec.StraightLength[2]),
-                turn = 0,
-                grade = grade,
-                sharp = false,
-            }
-        end
-        -- Trim the last piece to land exactly on `length`, keeping a curve's tightness.
-        local left = length - total
-        if piece.length > left then
-            piece.turn *= left / piece.length
-            piece.length = left
-        end
-        heading += piece.turn
-        total += piece.length
-        table.insert(pieces, piece)
-        curveNext = not curveNext
-    end
-    return pieces
-end
 
 -- Samples pieces into points about `step` studs apart, starting at `start` facing `heading`.
 function Track.build(pieces: { Piece }, start: Vec, heading: number, step: number): Track
@@ -186,6 +116,22 @@ function Track.sample(track: Track, distance: number): (Vec, Vec)
         return position, { x = math.cos(track.startHeading), y = 0, z = math.sin(track.startHeading) }
     end
     return position, { x = dx / size, y = dy / size, z = dz / size }
+end
+
+-- The track's shape around `distance`, measured over `reach` studs either side: grade (drop per horizontal
+-- stud, positive going downhill) and curvature (heading change per stud, positive turning right).
+function Track.shapeAt(track: Track, distance: number, reach: number?): (number, number)
+    local span = reach or 4
+    local a, aDirection = Track.sample(track, distance - span)
+    local b, bDirection = Track.sample(track, distance + span)
+    local dx, dz = b.x - a.x, b.z - a.z
+    local horizontal = math.sqrt(dx * dx + dz * dz)
+    if horizontal < 1e-6 then
+        return 0, 0
+    end
+    local turn = math.atan2(bDirection.z, bDirection.x) - math.atan2(aDirection.z, aDirection.x)
+    turn = (turn + math.pi) % (2 * math.pi) - math.pi
+    return (a.y - b.y) / horizontal, turn / horizontal
 end
 
 function Track.sharpAt(track: Track, distance: number): boolean
