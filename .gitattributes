@@ -1,0 +1,4 @@
+# StyLua checks for Unix line endings, so keep LF everywhere (see TRAPS.md).
+* text=auto eol=lf
+*.rbxl binary
+*.rbxm binary

@@ -1,0 +1,2 @@
+-- Replaces Roblox's default "Health" script, which slowly regenerates health.
+-- Health only changes through the server's Survivors module, so a downed player stays downed.
