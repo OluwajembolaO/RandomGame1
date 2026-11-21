@@ -11,3 +11,6 @@
 /Packages/
 /sourcemap.json
 wally.lock
+
+# Blender backup copies
+*.blend1
