@@ -92,4 +92,48 @@ T.describe("Kit", function()
             "station in a leg"
         )
     end)
+
+    -- A stand-in washout, so the leg rules are tested whatever the zone's kit has in it.
+    local withWashout = table.clone(pieces)
+    withWashout.Test_Washout =
+        { Kind = "Tunnel", Length = 64, Turn = 0, Drop = 10, Sharp = false, Gap = { From = 28, To = 48, Drop = 6 } }
+    local washoutSpec = table.clone(spec)
+    washoutSpec.Washouts = { "Test_Washout" }
+    washoutSpec.WashoutEvery = { 3, 5 }
+
+    T.it("puts washouts in legs, each straight after a straight run-up", function()
+        local seen = 0
+        for seed = 1, 200 do
+            local sequence = Kit.leg(Rng.new(seed), withWashout, washoutSpec, 1300, 0, 0)
+            local ok, problem = Kit.check(sequence, withWashout, washoutSpec, 0, 0)
+            T.truthy(ok, "seed " .. seed .. ": " .. tostring(problem))
+            for index, id in sequence do
+                if id == "Test_Washout" then
+                    seen += 1
+                    T.equal(sequence[index - 1], spec.Straight, "seed " .. seed .. " run-up")
+                    local after = sequence[index + 1]
+                    T.truthy(after and not withWashout[after].Sharp, "seed " .. seed .. " sharp bend after a washout")
+                end
+            end
+        end
+        T.truthy(seen >= 200, "expected about one washout every few tunnels, saw " .. seen)
+    end)
+
+    T.it("catches a washout without a run-up", function()
+        local straight = spec.Straight
+        local sequence = { straight, straight, "Tunnel_BendR", "Test_Washout", straight, straight }
+        T.falsy((Kit.check(sequence, withWashout, washoutSpec, 0, 0)))
+        local fine = { straight, straight, straight, "Test_Washout", straight, straight }
+        T.truthy((Kit.check(fine, withWashout, washoutSpec, 0, 0)))
+    end)
+
+    T.it("maps a washout's gap onto its track piece", function()
+        local piece = Kit.trackPiece(withWashout.Test_Washout)
+        T.near(piece.grade, (10 - 6) / 64, 1e-12, "the gap's drop isn't part of the grade")
+        local gap = piece.gap :: any
+        T.equal(gap.from, 28)
+        T.equal(gap.to, 48)
+        T.equal(gap.drop, 6)
+        T.equal(Kit.trackPiece(pieces.Tunnel_Straight).gap, nil)
+    end)
 end)

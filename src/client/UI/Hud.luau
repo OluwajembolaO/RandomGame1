@@ -1,5 +1,6 @@
 --!strict
--- The run HUD: where you are, the cart's HP, the brake, sharp-curve warnings and ammo.
+-- The run HUD: where you are, the cart's HP, how you're driving it, warnings (off the rails, tipping, a gap
+-- and the speed it needs, a sharp bend and which way to lean) and ammo.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16,7 +17,13 @@ local me = Players.LocalPlayer
 
 local AMBER = Color3.fromRGB(255, 196, 120)
 local RED = Color3.fromRGB(235, 70, 55)
+local GREEN = Color3.fromRGB(120, 235, 120)
 local INK = Color3.fromRGB(16, 13, 11)
+
+-- Which way to lean into a bend: 1 for a right-hand bend, -1 for a left.
+local function leanText(side: number): string
+    return if side > 0 then "LEAN RIGHT ▶ [E]" elseif side < 0 then "[Q] ◀ LEAN LEFT" else "LEAN INTO IT"
+end
 
 local PHASE_TITLES = {
     Station = "THE STATION",
@@ -83,8 +90,18 @@ local function Hud()
     local hp = useAttribute(info, "CartHp", 0)
     local maxHp = useAttribute(info, "CartMaxHp", 1)
     local braking = useAttribute(info, "Braking", false)
-    local brakeReady = useAttribute(info, "BrakeReady", true)
+    local pushing = useAttribute(info, "Pushing", false)
+    local lean = useAttribute(info, "Lean", 0)
+    local tilt = useAttribute(info, "Tilt", 0)
+    local leanSide = useAttribute(info, "LeanSide", 0)
+    local derailed = useAttribute(info, "Derailed", false)
+    local pushBack = useAttribute(info, "PushBack", 0)
+    local pushers = useAttribute(info, "Pushers", 0)
     local sharpIn = useAttribute(info, "SharpIn", -1)
+    local sharpSide = useAttribute(info, "SharpSide", 0)
+    local gapIn = useAttribute(info, "GapIn", -1)
+    local gapNeed = useAttribute(info, "GapNeed", 0)
+    local speed = useAttribute(info, "Speed", 0)
     local ammo = useAttribute(me, "Ammo", 0)
     local reloading = useAttribute(me, "Reloading", false)
 
@@ -99,9 +116,33 @@ local function Hud()
     if countdown > 0 then
         subtitle = (if message ~= "" then message .. "  " else "") .. countdown
     end
-    local warning = riding and sharpIn >= 0 and sharpIn <= Configs.Run.Cart.SharpWarnDistance
+    -- The one warning that matters most right now: off the rails, tipping, a gap, then a sharp bend.
+    local warning: string? = nil
+    local warningColor = RED
+    local hint: string? = nil
+    if riding and derailed then
+        warning = "OFF THE RAILS!"
+        hint = "HOLD [E] ON THE CART TO PUSH IT BACK ON — MORE OF YOU IS FASTER"
+    elseif riding and tilt > 0.15 then
+        warning = "TIPPING!  " .. leanText(leanSide)
+    elseif riding and gapIn >= 0 and gapIn <= Configs.Run.Cart.Jump.WarnDistance then
+        local fastEnough = speed >= gapNeed
+        warning = "GAP AHEAD — NEED " .. gapNeed .. "  ·  YOU " .. speed
+        warningColor = if fastEnough then GREEN else RED
+        hint = if fastEnough then "KEEP IT UP" else "HOLD [W] TO PUSH — DON'T BRAKE"
+    elseif riding and sharpIn >= 0 and sharpIn <= Configs.Run.Cart.SharpWarnDistance then
+        warning = "SHARP BEND — SLOW DOWN OR " .. leanText(sharpSide)
+    end
 
-    local brakeText = if braking then "BRAKING" elseif brakeReady then "[F] BRAKE" else "BRAKE COOLING"
+    local driveText = if braking
+        then "BRAKING"
+        elseif pushing then "PUSHING"
+        else "HOLD [W] PUSH   ·   [S] BRAKE   ·   [Q] / [E] LEAN"
+    if lean <= -0.3 then
+        driveText ..= "   ·   ◀ LEANING"
+    elseif lean >= 0.3 then
+        driveText ..= "   ·   LEANING ▶"
+    end
     return e("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, {
         Title = label({ text = title, size = 30, position = UDim2.new(0.5, 0, 0, 12) }),
         Genre = if phase == "AtStop" and genre ~= ""
@@ -117,21 +158,39 @@ local function Hud()
             else nil,
         Warning = if warning
             then label({
-                text = "SHARP CURVE AHEAD — BRAKE!",
+                text = warning,
                 size = 34,
                 position = UDim2.fromScale(0.5, 0.3),
-                color = RED,
+                color = warningColor,
             })
+            else nil,
+        Hint = if hint
+            then label({
+                text = hint,
+                size = 18,
+                position = UDim2.new(0.5, 0, 0.3, 46),
+                color = Color3.new(1, 1, 1),
+                width = 900,
+            })
+            else nil,
+        PushBack = if riding and derailed
+            then bar(
+                pushBack,
+                AMBER,
+                UDim2.new(0.5, 0, 0.3, 104),
+                if pushers > 0 then "PUSHING  ·  " .. pushers .. " ON IT" else "NOBODY'S PUSHING"
+            )
             else nil,
         CartHp = if phase ~= "Station"
             then bar(hp / math.max(1, maxHp), RED, UDim2.new(0.5, 0, 1, -40), "CART  " .. hp .. " / " .. maxHp)
             else nil,
-        Brake = if riding
+        Drive = if riding and not derailed
             then label({
-                text = brakeText,
+                text = driveText,
                 size = 18,
-                position = UDim2.new(0.5, 0, 1, -92),
+                position = UDim2.new(0.5, 0, 1, -96),
                 color = if braking then RED else AMBER,
+                width = 900,
             })
             else nil,
         Ammo = label({

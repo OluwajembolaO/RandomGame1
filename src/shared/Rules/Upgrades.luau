@@ -15,7 +15,8 @@ function Upgrades.baseStats(configs: any): Stats
     return {
         CartMaxHp = configs.Run.Cart.MaxHp,
         ChewArmor = 1,
-        BrakeSeconds = configs.Run.Cart.BrakeSeconds,
+        TipLimit = configs.Run.Cart.TipLimit,
+        RightSeconds = configs.Run.Cart.RightSeconds,
         ReviveSeconds = configs.Run.Crew.ReviveSeconds,
         RivetCooldown = configs.Weapons.RivetGun.Cooldown,
         RivetDamage = configs.Weapons.RivetGun.Damage,

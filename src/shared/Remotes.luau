@@ -6,7 +6,7 @@ local RunService = game:GetService("RunService")
 
 local NAMES = {
     "Fire", -- client -> server: (aim: Vector3) a Rivet Gun shot
-    "Brake", -- client -> server: () pull the cart's brake
+    "Drive", -- client -> server: (throttle: number, lean: number) brake -1 / push 1, lean -1 left .. 1 right
     "Vote", -- client -> server: (option: number) a fork or upgrade vote
     "Keypad", -- client -> server: (entry: { number }) the Signal Room code
     "Effect", -- server -> client: (kind: string, ...) tracers, hits, shakes, titles
@@ -41,7 +41,7 @@ end
 
 return {
     Fire = event("Fire"),
-    Brake = event("Brake"),
+    Drive = event("Drive"),
     Vote = event("Vote"),
     Keypad = event("Keypad"),
     Effect = event("Effect"),

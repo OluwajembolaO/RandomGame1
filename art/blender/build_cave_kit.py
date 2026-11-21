@@ -49,7 +49,17 @@ KIT = {
     "Cavern_Garden": dict(kind="Cavern", length=224, turn=0.0, drop=10.0, palette=COLORS, seed=33,
                           size=(95, 60, 42), lake=True, side=1),
     "EndCap": dict(kind="Cap", length=8, turn=0.0, drop=0.0, palette=COLORS, seed=41),
+    # Broken track (Rules/Jump): a gap from `start` to `end` (horizontal studs in) whose far side is `drop`
+    # lower; the piece's drop includes it. Gap pieces are straight, so horizontal studs are just +Y here.
+    # The washout: the tunnel floor has fallen into a pit. Clearable at cruise speed, not under the brake.
+    "Tunnel_Washout": dict(kind="Tunnel", length=64, turn=0.0, drop=10.0, palette=COLORS, seed=26,
+                           gap=dict(start=28.0, end=48.0, drop=6.0)),
+    # The rift: a chasm whose trestle has lost a whole section. Needs pushing to clear.
+    "Cavern_Rift": dict(kind="Cavern", length=224, turn=0.0, drop=20.0, palette=("Yellow", "Green"), seed=34,
+                        size=(80, 75, 130), lake=False, side=1, gap=dict(start=96.0, end=132.0, drop=10.0)),
 }
+
+PIT = 58.0  # how far a washout's pit drops below the cross-section center
 
 # Preview colors (Roblox colors are set in Studio; see TRAPS #39).
 SWATCH = {
@@ -136,17 +146,34 @@ def to_roblox(v):
 # --- the track path, exactly as Rules/Track.build steps it ---------------------------------------------
 
 
+def height_at(spec, s):
+    """Rail height `s` horizontal studs into a piece, exactly as Rules/Track.heightAt: the grade, plus the
+    gap's drop spread across the gap."""
+    gap = spec.get("gap")
+    gap_drop = gap["drop"] if gap else 0.0
+    below = (spec["drop"] - gap_drop) / spec["length"] * s
+    if gap:
+        below += gap_drop * min(1.0, max(0.0, (s - gap["start"]) / (gap["end"] - gap["start"])))
+    return -below
+
+
+def in_gap(spec, s, margin=0.0):
+    gap = spec.get("gap")
+    return bool(gap) and gap["start"] - margin < s < gap["end"] + margin
+
+
 def path(spec):
     """Points every STEP studs: (position, heading, distance). Heading 0 is +Y; positive turns right (+X)."""
-    length, turn, drop = spec["length"], spec["turn"], spec["drop"]
+    length, turn = spec["length"], spec["turn"]
     count = max(1, math.ceil(length / STEP))
-    ds, dh, grade = length / count, turn / count, drop / length
+    ds, dh = length / count, turn / count
     x = y = z = h = 0.0
     travelled = 0.0
     points = [(Vector((0, 0, 0)), 0.0, 0.0)]
-    for _ in range(count):
+    for k in range(1, count + 1):
         mid = h + dh / 2
-        dx, dy, dz = math.sin(mid) * ds, math.cos(mid) * ds, -grade * ds
+        dx, dy = math.sin(mid) * ds, math.cos(mid) * ds
+        dz = height_at(spec, k * ds) - height_at(spec, (k - 1) * ds)
         x, y, z, h = x + dx, y + dy, z + dz, h + dh
         travelled += math.sqrt(dx * dx + dy * dy + dz * dz)
         points.append((Vector((x, y, z)), h, travelled))
@@ -230,6 +257,17 @@ def shape_for(name, spec):
 
         return params, lambda d: (1.6 + 4 * ramp(d)) * ends_taper(d), ramp
 
+    gap = spec.get("gap")
+    if gap:
+        # A washout: the floor gives way into a deep pit under the gap, with steep broken edges.
+        def pit(d):
+            return smoothstep((d - gap["start"] + 3) / 5) * smoothstep((gap["end"] + 3 - d) / 5)
+
+        def params(d):
+            return dict(hw=HALF_W + 4 * pit(d), top=TOP, bottom=lerp(BOTTOM, PIT, pit(d)))
+
+        return params, lambda d: (1.8 + 3.0 * pit(d)) * ends_taper(d), pit
+
     def params(d):
         return dict(hw=HALF_W, top=TOP, bottom=BOTTOM)
 
@@ -302,7 +340,7 @@ class Piece:
                                 flicker=flicker, pulse=pulse))
 
     def track_z(self, d):
-        return -self.spec["drop"] * d / self.spec["length"]
+        return height_at(self.spec, d)
 
 
 def corridor(piece, vert, d, a, margin=0.0):
@@ -371,16 +409,24 @@ def shoring(piece, position, heading):
 def trestle(piece, info_by_ring, points, ramp):
     """Timber bents under the track wherever the floor drops away, plus the deck and lantern posts."""
     bm = piece.bm("Timber")
+    spec = piece.spec
     gauge = 2.5 + 1.4
-    # Deck stringers along the whole piece.
+    # Deck stringers along the whole piece, except where a section has fallen away (a gap).
     for side in (-1, 1):
         for i in range(len(points) - 1):
             a, ha = points[i][0], points[i][1]
             b, hb = points[i + 1][0], points[i + 1][1]
+            if in_gap(spec, (a.y + b.y) / 2):
+                continue
             beam(bm, a + right_of(ha) * side * 3.1 - UP * 1.3, b + right_of(hb) * side * 3.1 - UP * 1.3, 1.1)
+    gap = spec.get("gap")
+    if gap:
+        broken_trestle(piece, bm, points, gap, gauge)
     bent = 0
     for i in range(0, len(points), 3):
         position, heading, d = points[i]
+        if in_gap(spec, position.y, margin=-1.0):
+            continue
         floor = lowest_below(info_by_ring[i], position)
         if floor is None or position.z - floor < 8:
             continue
@@ -403,6 +449,81 @@ def trestle(piece, info_by_ring, points, ramp):
             beam(bm, Vector((post.x, post.y, deck)), Vector((post.x, post.y, deck + 7)), 0.6)
             lantern(piece, Vector((post.x, post.y, deck + 7.6)), 32)
         bent += 1
+
+
+def point_at(points, s):
+    """The path point nearest `s` horizontal studs in (gap pieces are straight along +Y)."""
+    return min(points, key=lambda p: abs(p[0].y - s))
+
+
+def broken_trestle(piece, bm, points, gap, gauge):
+    """Where the trestle's middle has fallen away: splintered stringer ends hanging over the drop at both
+    edges, a snapped bent leaning in, and fallen timbers far below."""
+    rng = piece.rng
+    for edge, facing in ((gap["start"], 1), (gap["end"], -1)):
+        position, heading, d = point_at(points, edge)
+        forward, right = forward_of(heading), right_of(heading)
+        for side in (-1, 1):
+            root = position + right * side * 3.1 - UP * 1.3
+            # The stringer snaps and droops into the gap, splintering into a couple of shards.
+            droop = Vector((0, 0, -rng.uniform(1.5, 3.5)))
+            tip = root + forward * facing * rng.uniform(2.5, 4.5) + droop
+            beam(bm, root, tip, 1.0)
+            for _ in range(2):
+                shard = tip + forward * facing * rng.uniform(0.6, 1.6) + Vector((rng.uniform(-0.5, 0.5), 0, rng.uniform(-1.4, -0.2)))
+                beam(bm, tip, shard, 0.35)
+        # Rail-height planks dangling off the edge.
+        for k in range(3):
+            hang = position + right * rng.uniform(-2.5, 2.5) + forward * facing * (0.6 + k * 0.7) - UP * 1.8
+            beam(bm, hang, hang - UP * rng.uniform(2.5, 5.5) + forward * facing * rng.uniform(-0.6, 0.6), 0.45)
+    # A snapped bent leaning into the gap, and timbers lying at the bottom.
+    mid_s = (gap["start"] + gap["end"]) / 2
+    position, heading, d = point_at(points, mid_s)
+    right = right_of(heading)
+    base = position - UP * 70 + right * 4
+    beam(bm, base, base + UP * 38 + forward_of(heading) * 9 - right * 3, 1.3)
+    for _ in range(5):
+        spot = position - UP * rng.uniform(85, 110) + right * rng.uniform(-14, 14) + forward_of(heading) * rng.uniform(-14, 14)
+        direction = Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-0.15, 0.15))).normalized()
+        beam(bm, spot, spot + direction * rng.uniform(6, 14), 1.1)
+    # A glow far down in the chasm, so the gap reads from the approach.
+    for color in piece.spec["palette"]:
+        piece.light(position - UP * 60 + right * rng.uniform(-10, 10), color, 60, 2.8, pulse=True)
+
+
+def washout(piece, points, gap):
+    """The fallen-in floor of a washed-out tunnel: rubble and broken sleepers down in the pit, a snapped
+    shoring beam across it, and crystals glowing at the bottom so the hole reads from the approach."""
+    rng = piece.rng
+    rock_bm, timber = piece.bm("Rock"), piece.bm("Timber")
+    mid_s = (gap["start"] + gap["end"]) / 2
+    position, heading, d = point_at(points, mid_s)
+    right, forward = right_of(heading), forward_of(heading)
+    floor = position.z + LIFT - PIT + 2
+    for _ in range(12):
+        spot = Vector((position.x, position.y, floor)) + right * rng.uniform(-14, 14) + forward * rng.uniform(-8, 8)
+        rock(rock_bm, spot, rng.uniform(1.5, 4.0), rng)
+    for _ in range(6):
+        spot = Vector((position.x, position.y, floor + 1)) + right * rng.uniform(-10, 10) + forward * rng.uniform(-8, 8)
+        direction = Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-0.6, 0.6))).normalized()
+        beam(timber, spot, spot + direction * rng.uniform(4, 8), 0.6)
+    # A shoring cap beam snapped and wedged diagonally across the pit, well below the rails.
+    a = position + right * 13 - UP * 7 - forward * 4
+    b = position - right * 11 - UP * 26 + forward * 5
+    beam(timber, a, b, 1.3)
+    # Broken rail-height stubs of sleeper sticking out over each edge.
+    for edge, facing in ((gap["start"], 1), (gap["end"], -1)):
+        p, h, _ = point_at(points, edge)
+        for k in range(2):
+            hang = p + forward_of(h) * facing * (0.8 + k * 0.9) - UP * 1.2 + right_of(h) * rng.uniform(-2, 2)
+            beam(timber, hang, hang - UP * rng.uniform(1.8, 3.5) + forward_of(h) * facing * 0.6, 0.5)
+    for i in range(3):
+        color = piece.spec["palette"][rng.randrange(len(piece.spec["palette"]))]
+        spot = Vector((position.x, position.y, floor + 1)) + right * rng.uniform(-9, 9) + forward * rng.uniform(-6, 6)
+        crystal_cluster(piece, spot, (UP + right * rng.uniform(-0.4, 0.4)).normalized(), rng.uniform(5, 9), color)
+        piece.light(spot + UP * 6, color, 50, 2.6, pulse=True)
+    # A red glow halfway down that lights the pit's walls, so the hole reads from the approach.
+    piece.light(position - UP * 18, "Red", 45, 3.2, pulse=True)
 
 
 def lowest_below(ring_info, position):
@@ -526,11 +647,15 @@ def dress(piece, points, info):
         if found:
             glowworm(piece, found[0].co.copy())
 
-    # Mine shoring every 32 studs through tunnels.
+    # Mine shoring every 32 studs through tunnels (a washout's stands clear of its pit).
     if kind == "Tunnel":
-        for d_mark in range(16, int(spec["length"]), 32):
+        gap = spec.get("gap")
+        marks = [12, 56] if gap else range(16, int(spec["length"]), 32)
+        for d_mark in marks:
             position, heading, d = points[round(d_mark / STEP)]
             shoring(piece, position, heading)
+        if gap:
+            washout(piece, points, gap)
 
     if big:
         trestle(piece, [by_ring[k] for k in ring_keys], points, None)
@@ -648,6 +773,10 @@ def write_kit_data(pieces, path_out):
         lines.append("            Turn = %s," % repr(round(spec["turn"], 6)))
         lines.append("            Drop = %s," % lua_number(spec["drop"]))
         lines.append("            Sharp = %s," % ("true" if spec.get("sharp") else "false"))
+        gap = spec.get("gap")
+        if gap:
+            lines.append("            Gap = { From = %s, To = %s, Drop = %s }," % (
+                lua_number(gap["start"]), lua_number(gap["end"]), lua_number(gap["drop"])))
         lines.append("            Palette = { %s }," % ", ".join('"%s"' % c for c in spec["palette"]))
         lines.append("            Lake = %s," % (lua_number(piece.lake) if piece.lake is not None else "nil"))
         lines.append("            Lights = {")

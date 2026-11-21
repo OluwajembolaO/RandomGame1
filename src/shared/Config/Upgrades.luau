@@ -46,11 +46,18 @@ return {
         Effects = { { Stat = "ReviveSeconds", Mult = 0.6 } },
     },
     {
-        Id = "BrakeBoost",
-        Name = "Brake Boost",
-        Description = "The brake holds 3 seconds longer.",
+        Id = "WideAxles",
+        Name = "Wide Axles",
+        Description = "The cart takes bends 20% harder before it tips over.",
         Max = 2,
-        Effects = { { Stat = "BrakeSeconds", Add = 3 } },
+        Effects = { { Stat = "TipLimit", Mult = 1.2 } },
+    },
+    {
+        Id = "Crowbars",
+        Name = "Crowbars",
+        Description = "Pushing a tipped cart back onto the rails is 40% faster.",
+        Max = 2,
+        Effects = { { Stat = "RightSeconds", Mult = 0.6 } },
     },
     {
         Id = "ChewGuard",

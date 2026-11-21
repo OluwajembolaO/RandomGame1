@@ -92,6 +92,38 @@ T.describe("Track", function()
         T.truthy(left < 0, "left bends curve negative")
     end)
 
+    T.it("drops across a gap by the gap's drop, and records where the gap is", function()
+        local piece = { kind = "Straight", length = 64, turn = 0, grade = 4 / 64, sharp = false }
+        piece.gap = { from = 28, to = 48, drop = 6 }
+        local track = Track.build({ piece }, START, 0, STEP)
+        T.near(track.points[#track.points].y, START.y - 4 - 6, 1e-9)
+        T.equal(#track.gaps, 1)
+        local gap = track.gaps[1]
+        T.equal(gap.length, 20)
+        T.equal(gap.drop, 6)
+        T.near(gap.from, 28 * math.sqrt(1 + (4 / 64) ^ 2), 1e-9)
+        local lip = Track.sample(track, gap.from)
+        local far = Track.sample(track, gap.to)
+        T.near(lip.y, START.y - 28 * 4 / 64, 1e-9)
+        T.near(far.y, START.y - 48 * 4 / 64 - 6, 1e-9)
+        T.near(Track.heightAt(piece, 48), -(48 * 4 / 64 + 6), 1e-9)
+        local ok, problem = Track.validate(track, RULES)
+        T.truthy(ok, problem)
+    end)
+
+    T.it("finds the gap ahead and moves gaps along when joining tracks", function()
+        local piece = { kind = "Straight", length = 64, turn = 0, grade = 4 / 64, sharp = false }
+        piece.gap = { from = 28, to = 48, drop = 6 }
+        local first = trackOf({ spec.Straight })
+        local second = Track.build({ piece }, first.points[#first.points], first.endHeading, STEP)
+        local joined = Track.concat({ first, second })
+        T.equal(#joined.gaps, 1)
+        T.near(joined.gaps[1].from, first.length + second.gaps[1].from, 1e-9)
+        T.equal(Track.nextGap(joined, 0), joined.gaps[1])
+        T.equal(Track.nextGap(joined, joined.gaps[1].to + 1), nil)
+        T.equal(#trackOf({ spec.Straight }).gaps, 0, "no gaps in plain track")
+    end)
+
     T.it("joins tracks end to end", function()
         local a = trackOf({ spec.Straight })
         local b = Track.build({ Kit.trackPiece(pieces.Tunnel_BendL) }, a.points[#a.points], a.endHeading, STEP)

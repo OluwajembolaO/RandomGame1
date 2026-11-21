@@ -39,6 +39,12 @@ Rules learned the hard way. Each one says what broke, the rule, and why. Add one
 
 14. **Only a few sounds ship with Roblox.** Studio's `content/sounds` has jump, land, footsteps, splash and a slider tick. Anything else needs uploaded `rbxassetid://` audio.
 
+43. **Roblox's camera builds each frame from the last frame's `camera.CFrame`.** A ride effect applied as `camera.CFrame *= offset` after the camera update (RenderPriority Camera + 1) gets read back next frame and piles up. The braking nod kept tipping the view further until it hit the pitch limit, and the shake and jitter drifted the view like a random walk. Put the clean view back in a step before the camera update (Camera - 1) and layer effects on after it (see `client/FirstPerson`). The same before-and-after pair turns the view with a cart, and slows the mouse by keeping only part of the turn Roblox's camera just made.
+
+44. **Move a player's character on their own client, not from the server.** The client owns its character's physics. A server `PivotTo` in the same frame as unseating them is overwritten, because their client still has them welded in and sends the seat's position back. A server `PivotTo` also keeps their velocity: riders let out of a cart falling into a gap kept falling at ~70 studs/s, went straight through a 1-stud invisible floor, and died below `FallenPartsDestroyHeight`. Fire the client a CFrame (the `Effect` remote's "Place"). It lets go of the seat, moves, and zeroes velocity. Keep a server move as a late fallback, and make catch-floors thick.
+
+45. **After a long move, clients can see a physics assembly in its old place for seconds, and its ProximityPrompts don't show.** The cart was hauled back 100+ studs by its AlignPosition. Its new position took more than 2.5 s to reach the client, and a prompt parented to the cart never showed or took input, even after toggling `Enabled`. A prompt on a plain part showed at once. For a long move, anchor the assembly and set its CFrame (a property change reaches clients right away). Put prompts on their own anchored marker part.
+
 ## World look
 
 15. **Size BillboardGuis in studs (`UDim2.fromScale`), not pixels.** Pixel-sized signs stay the same size up close and cover the HUD. In studs they shrink with distance like real signs.

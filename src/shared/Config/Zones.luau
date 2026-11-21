@@ -45,8 +45,11 @@ return {
             Straight = "Tunnel_Straight",
             Bends = { "Tunnel_BendL", "Tunnel_BendR" },
             Sharps = { "Tunnel_SharpL", "Tunnel_SharpR" },
-            Caverns = { "Cavern_Lake", "Cavern_Chasm", "Cavern_Garden" },
+            Caverns = { "Cavern_Lake", "Cavern_Chasm", "Cavern_Garden", "Cavern_Rift" },
             CavernGap = { 192, 384 }, -- studs of tunnel between caverns
+            -- Washed-out tunnels with a gap to jump (Rules/Jump), every few tunnel pieces.
+            Washouts = { "Tunnel_Washout" },
+            WashoutEvery = { 6, 10 },
             EdgeTunnels = 2, -- tunnel pieces kept at each end of a leg, between caverns and stops
             SharpEvery = { 4, 7 }, -- tunnel pieces between sharp bends
             StraightChance = 0.45,

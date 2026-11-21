@@ -14,21 +14,49 @@ return {
 
     Cart = {
         MaxHp = 200,
-        Speed = 28, -- studs per second
-        Accel = 12, -- studs per second per second; brakes bite twice as hard
+        Speed = 40, -- studs per second on the flat; ~48 down the tunnels' grade
+        Accel = 17, -- studs per second per second; brakes bite twice as hard
+        -- The crew holds the brake (S) or pushes (W); anyone braking wins.
         BrakeFactor = 0.45, -- speed multiplier while braking
-        BrakeSeconds = 6,
-        BrakeCooldown = 1.5,
-        SafeCurveSpeed = 16, -- faster than this through a sharp curve damages the cart
-        SharpDamagePerSecond = 16, -- an unbraked sharp bend costs about 25 HP
-        SharpWarnDistance = 90, -- studs before a sharp curve that the HUD warns the crew
+        PushFactor = 1.35, -- pushing runs about 54 studs/s on the flat, 65 down a tunnel
+        SharpWarnDistance = 150, -- studs before a sharp curve that the HUD warns the crew
+
+        -- Tipping over (Rules/Cart): sideways pull is speed^2 x curvature. Past TipLimit the cart lifts onto
+        -- its outer wheels and the tilt fills (TipRate per unit over the limit, per second); full tilt tips it.
+        -- A normal bend at cruise pulls ~15, a sharp one ~22 (more coming in fast), pushing through a normal
+        -- bend ~28. Everyone leaning in takes 80% more: even a pushed bend, if the whole crew commits.
+        TipLimit = 18.5,
+        LeanBonus = 0.8, -- the whole crew leaning into the bend takes 80% more pull
+        LeanPenalty = 0.3, -- leaning out of it takes 30% less
+        -- Per second, so they scale with speed: the faster the cart, the less time it spends in each bend.
+        TipRate = 4.3,
+        TipRecover = 2.1,
+        LeanTilt = 14, -- degrees the cart tilts toward the side the crew leans
+        LiftMax = 28, -- degrees it lifts onto its outer wheels just before going over
+        -- Pushing a tipped cart back onto the rails: one player takes RightSeconds, each helper adds 60%.
+        RightSeconds = 6,
+        HelperBoost = 0.6,
+        CrashWalkway = 40, -- studs of invisible walkway either side of a crash, so nobody falls off a trestle
+
+        -- Jumping gaps in broken track (Rules/Jump): the cart leaves a broken lip at Lip degrees and flies
+        -- under Gravity (studs/s^2, floatier than Roblox's) onto the lower far side, with Clearance studs to
+        -- spare. Too slow and it falls in: the crew finds it tipped over RunUp studs before the gap.
+        -- Gravity scales with speed squared, so the same gaps ask the same of the crew at any cart speed.
+        Jump = {
+            Gravity = 80,
+            Lip = 12,
+            Clearance = 1.5,
+            RunUp = 140,
+            FallSeconds = 1.2,
+            WarnDistance = 240,
+        },
         -- Momentum (Rules/Cart.targetSpeed): the tunnels' 6% grade makes the cart run ~20% faster, bends slow it.
         SlopeBoost = 3.2,
         CurveDrag = 12,
         CurveDragMax = 0.3,
-        -- Lean (Rules/Cart.bank): degrees per stud/s^2 of sideways pull; a bend at full speed leans ~8 degrees.
-        BankPerAccel = 1.1,
-        MaxBank = 13,
+        -- Lean (Rules/Cart.bank): degrees per stud/s^2 of sideways pull; a bend at full speed leans ~10 degrees.
+        BankPerAccel = 0.6,
+        MaxBank = 18,
         RepairPerSecond = 8,
         HeadlampRange = 60,
         Seats = 4,

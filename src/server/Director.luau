@@ -18,6 +18,7 @@ local Cart = require(Shared.Rules.Cart)
 local Configs = require(Shared.Configs)
 local Layout = require(Shared.Rules.Layout)
 local Route = require(Shared.Rules.Route)
+local Remotes = require(Shared.Remotes)
 local RunInfo = require(Shared.RunInfo)
 local RunState = require(Shared.Rules.RunState)
 local Upgrades = require(Shared.Rules.Upgrades)
@@ -69,6 +70,10 @@ local function waitForLever(lever: ProximityPrompt)
     end
     connection:Disconnect()
     lever.Enabled = false
+    local post = lever.Parent
+    if post and post:IsA("BasePart") then
+        Remotes.Effect:FireAllClients("Sound", "Lever", post.Position)
+    end
 end
 
 local function besideCart(): CFrame
@@ -115,6 +120,7 @@ local function runOnce()
     RunInfo.set("CaveSeed", seed)
     message("Laying the rails...")
     TrackDresser.dress(layout, zone, folder)
+    Placeholders.gapSigns(folder, layout)
     local stationFloor, stationLength = World.chamber(layout, layout.segments[1])
     local station = Placeholders.station(folder, stationFloor, stationLength, zone.Palette)
     Survivors.setSpawn(station.spawn)

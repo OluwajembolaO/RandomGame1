@@ -4,6 +4,7 @@
 
 return table.freeze({
     Assets = require("./Config/Assets") :: any,
+    Camera = require("./Config/Camera") :: any,
     Kit = require("./Config/KitData") :: any,
     Mobs = require("./Config/Mobs") :: any,
     Run = require("./Config/Run") :: any,

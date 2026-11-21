@@ -1,8 +1,8 @@
 --!strict
 -- The cart on each client: its headlamp beam and lantern light (made here, since lights the server made
 -- rendered nothing on clients; TRAPS #42), wheels that turn with its speed, sparks off the wheels when braking
--- or scraping through a sharp bend, and the brake lever swinging back while braking. Drives the Motor6D joints CartService rigs on the Blender cart. Local only; nothing here
--- affects physics.
+-- or lifting onto two wheels in a bend, and the brake lever swinging back while braking. Drives the Motor6D
+-- joints CartService rigs on the Blender cart. Local only; nothing here affects physics.
 
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -122,8 +122,9 @@ function CartFx.start()
         local speed = RunInfo.get("Speed")
         local rolling = if type(speed) == "number" then speed else 0
         local braking = RunInfo.get("Braking") == true
-        local scraping = RunInfo.get("SharpIn") == 0 and rolling > Configs.Run.Cart.SafeCurveSpeed
-        local sparking = rolling > 4 and (braking or scraping)
+        local tilt = RunInfo.get("Tilt")
+        local tilting = type(tilt) == "number" and tilt > 0.15
+        local sparking = rolling > 4 and (braking or tilting) and RunInfo.get("Airborne") ~= true
         if sparks and sparks.flash.Enabled ~= sparking then
             sparks.flash.Enabled = sparking
             for _, particles in sparks.emitters do

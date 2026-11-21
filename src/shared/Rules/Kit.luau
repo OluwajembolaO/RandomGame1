@@ -7,8 +7,11 @@
 local Rng = require("./Rng")
 local Track = require("./Track")
 
--- A KitData piece. Kind is "Station", "Stop", "Tunnel", "Cavern" or "Cap" (TRAPS #19).
-export type PieceDef = { Kind: string, Length: number, Turn: number, Drop: number, Sharp: boolean }
+-- A KitData piece. Kind is "Station", "Stop", "Tunnel", "Cavern" or "Cap" (TRAPS #19). Broken-track pieces
+-- have a Gap: its ends in horizontal studs into the piece, and how much lower the far side sits (that drop
+-- is part of the piece's Drop).
+export type GapDef = { From: number, To: number, Drop: number }
+export type PieceDef = { Kind: string, Length: number, Turn: number, Drop: number, Sharp: boolean, Gap: GapDef? }
 export type Pieces = { [string]: PieceDef }
 
 -- A zone's Kit config.
@@ -21,6 +24,8 @@ export type Spec = {
     Sharps: { string },
     Caverns: { string },
     CavernGap: { number },
+    Washouts: { string }, -- tunnels with a gap to jump; each comes straight after a straight (its run-up)
+    WashoutEvery: { number }, -- tunnel pieces between washouts
     EdgeTunnels: number,
     SharpEvery: { number },
     StraightChance: number,
@@ -31,12 +36,15 @@ local Kit = {}
 
 -- The track piece a kit piece is modeled around.
 function Kit.trackPiece(def: PieceDef): Track.Piece
+    local gap = def.Gap
+    local gapDrop = if gap then gap.Drop else 0
     return {
         kind = if def.Turn == 0 then "Straight" else "Curve",
         length = def.Length,
         turn = def.Turn,
-        grade = if def.Length > 0 then def.Drop / def.Length else 0,
+        grade = if def.Length > 0 then (def.Drop - gapDrop) / def.Length else 0,
         sharp = def.Sharp,
+        gap = if gap then { from = gap.From, to = gap.To, drop = gap.Drop } else nil,
     }
 end
 
@@ -62,6 +70,8 @@ function Kit.leg(rng: Rng.Rng, pieces: Pieces, spec: Spec, length: number, headi
     local edge = spec.EdgeTunnels * tunnel
     local untilCavern = Rng.range(rng, spec.CavernGap[1], spec.CavernGap[2]) / 2
     local untilSharp = Rng.int(rng, spec.SharpEvery[1], spec.SharpEvery[2])
+    local washouts = spec.Washouts or {}
+    local untilWashout = if #washouts > 0 then Rng.int(rng, spec.WashoutEvery[1], spec.WashoutEvery[2]) else math.huge
     local lastCavern: string? = nil
 
     local function add(id: string)
@@ -92,7 +102,27 @@ function Kit.leg(rng: Rng.Rng, pieces: Pieces, spec: Spec, length: number, headi
         if not placed then
             local choice: string? = nil
             untilSharp -= 1
-            if untilSharp <= 0 then
+            untilWashout -= 1
+            -- A washout once it's due: straight after a straight tunnel (its run-up), with tunnel to spare
+            -- after it, and never a sharp bend straight after the landing.
+            if untilWashout <= 0 and total >= edge then
+                local options = {}
+                for _, id in fitting(washouts, pieces, heading, base, spec.MaxHeading) do
+                    if remaining - pieces[id].Length >= edge then
+                        table.insert(options, id)
+                    end
+                end
+                if #options > 0 then
+                    if sequence[#sequence] == spec.Straight then
+                        choice = Rng.pick(rng, options)
+                        untilWashout = Rng.int(rng, spec.WashoutEvery[1], spec.WashoutEvery[2])
+                        untilSharp = math.max(untilSharp, 2)
+                    else
+                        choice = spec.Straight
+                    end
+                end
+            end
+            if not choice and untilSharp <= 0 then
                 local sharps = fitting(spec.Sharps, pieces, heading, base, spec.MaxHeading)
                 if #sharps > 0 then
                     choice = Rng.pick(rng, sharps)
@@ -142,6 +172,9 @@ function Kit.check(sequence: { string }, pieces: Pieces, spec: Spec, heading: nu
         local afterCavern = previous ~= nil and pieces[previous].Kind == "Cavern"
         if isCavern and afterCavern then
             return false, "caverns touch at piece " .. index
+        end
+        if isTunnel and def.Gap and previous ~= spec.Straight then
+            return false, "washout at piece " .. index .. " has no straight run-up"
         end
     end
     return true, nil

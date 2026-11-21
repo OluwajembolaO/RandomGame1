@@ -1,6 +1,6 @@
 --!strict
--- Client-side effects: rivet tracers, the ride camera, and the cave's living lights (flicker, pulse,
--- distance culling). Listens to the server's Effect remote.
+-- Client-side effects: rivet tracers and the cave's living lights (flicker, pulse, distance culling).
+-- Listens to the server's Effect remote (shakes go to FirstPerson).
 
 local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
@@ -9,8 +9,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
+local Audio = require(script.Parent.Audio)
+local FirstPerson = require(script.Parent.FirstPerson)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
-local RunInfo = require(ReplicatedStorage.Shared.RunInfo)
 
 local Fx = {}
 
@@ -18,66 +19,8 @@ local folder = Instance.new("Folder")
 folder.Name = "ClientFx"
 folder.Parent = workspace
 
-local shake = 0
-
-local BASE_FOV = 70
-local SPEED_FOV = 12 -- extra field of view at top speed
-local TOP_SPEED = 34
-local LEAN_FOLLOW = 0.75 -- how much of the cart's lean the camera rolls with
-
-local function cartRoot(): BasePart?
-    local run = workspace:FindFirstChild("Run")
-    local cart = run and run:FindFirstChild("Cart")
-    local root = cart and cart:FindFirstChild("Root")
-    return if root and root:IsA("BasePart") then root else nil
-end
-
--- How riding feels, layered on top of the first-person camera every frame (after Roblox's camera update,
--- so nothing accumulates): roll with the cart's lean, a rumble and bob that grow with speed, a nod forward
--- under braking, a wider field of view at speed, and the shake from scraping through sharp bends.
-local function startRideCamera()
-    local player = Players.LocalPlayer
-    local speed, lastSpeed, pitch = 0, 0, 0
-    local fov = BASE_FOV
-    RunService:BindToRenderStep("RideCamera", Enum.RenderPriority.Camera.Value + 1, function(dt: number)
-        local camera = workspace.CurrentCamera
-        local riding = player:GetAttribute("Riding") == true
-        local reported = RunInfo.get("Speed")
-        local target = if riding and type(reported) == "number" then reported else 0
-        speed += (target - speed) * math.min(1, dt * 6)
-        local fraction = math.clamp(speed / TOP_SPEED, 0, 1)
-
-        fov += ((BASE_FOV + SPEED_FOV * fraction) - fov) * math.min(1, dt * 3)
-        camera.FieldOfView = fov
-
-        local offset = CFrame.identity
-        if riding then
-            local root = cartRoot()
-            local roll = if root then math.asin(math.clamp(root.CFrame.RightVector.Y, -1, 1)) * LEAN_FOLLOW else 0
-            local accel = (speed - lastSpeed) / math.max(dt, 1e-3)
-            pitch += (math.clamp(accel * 0.004, -0.07, 0.05) - pitch) * math.min(1, dt * 5)
-            local now = os.clock()
-            local bob = math.noise(now * 9, 1.3) * 0.08 * fraction
-            local jitterX = math.noise(now * 15, 7.1) * 0.006 * fraction
-            local jitterY = math.noise(now * 13, 3.7) * 0.004 * fraction
-            offset = CFrame.new(0, bob, 0) * CFrame.Angles(pitch + jitterX, jitterY, roll)
-        else
-            pitch = 0
-        end
-        lastSpeed = speed
-
-        if shake > 0 then
-            local size = shake * 0.03
-            offset *= CFrame.Angles((math.random() - 0.5) * size, (math.random() - 0.5) * size, 0)
-            shake = math.max(0, shake - dt * 2.5)
-        end
-        if offset ~= CFrame.identity then
-            camera.CFrame *= offset
-        end
-    end)
-end
-
 function Fx.tracer(from: Vector3, to: Vector3, hitMob: boolean)
+    Audio.at("Rivet", from)
     local length = (to - from).Magnitude
     if length < 0.1 then
         return
@@ -112,8 +55,34 @@ function Fx.tracer(from: Vector3, to: Vector3, hitMob: boolean)
     Debris:AddItem(spark, 0.2)
 end
 
-function Fx.shake(amount: number)
-    shake = math.max(shake, amount)
+local FADE_IN, FADE_OUT = 0.35, 0.6
+local fader: Frame? = nil
+
+-- Fades the screen to black, holds it for `hold` seconds, and fades back (hides the cart being hauled
+-- back after missing a gap).
+function Fx.fade(hold: number)
+    local frame = fader
+    if not frame then
+        local screen = Instance.new("ScreenGui")
+        screen.Name = "Fade"
+        screen.IgnoreGuiInset = true
+        screen.ResetOnSpawn = false
+        screen.DisplayOrder = 100
+        screen.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+        local made = Instance.new("Frame")
+        made.Size = UDim2.fromScale(1, 1)
+        made.BackgroundColor3 = Color3.new(0, 0, 0)
+        made.BackgroundTransparency = 1
+        made.BorderSizePixel = 0
+        made.Parent = screen
+        fader = made
+        frame = made
+    end
+    local black = frame :: Frame
+    TweenService:Create(black, TweenInfo.new(FADE_IN), { BackgroundTransparency = 0 }):Play()
+    task.delay(FADE_IN + hold, function()
+        TweenService:Create(black, TweenInfo.new(FADE_OUT), { BackgroundTransparency = 1 }):Play()
+    end)
 end
 
 local ANIMATE_RANGE = 220 -- only lights this close to the camera bother to waver or breathe
@@ -206,11 +175,11 @@ function Fx.start()
                 Fx.tracer(args[2], args[3], args[4] == true)
             end
         elseif kind == "Shake" then
-            Fx.shake(tonumber(args[1]) or 0.3)
+            FirstPerson.shake(tonumber(args[1]) or 0.3)
+        elseif kind == "Fade" then
+            Fx.fade(tonumber(args[1]) or 1)
         end
     end)
-
-    startRideCamera()
 end
 
 return Fx

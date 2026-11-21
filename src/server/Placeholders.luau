@@ -9,6 +9,9 @@ local World = require(script.Parent.World)
 
 local Shared = ReplicatedStorage.Shared
 local Configs = require(Shared.Configs)
+local Jump = require(Shared.Rules.Jump)
+local Layout = require(Shared.Rules.Layout)
+local TrackFrames = require(Shared.TrackFrames)
 
 local trackConfig = Configs.Run.Track
 
@@ -61,6 +64,21 @@ local function sign(model: Model, at: CFrame, title: string, subtitle: string)
     small.TextColor3 = Color3.fromRGB(220, 210, 200)
     small.Text = subtitle
     small.Parent = gui
+end
+
+-- A warning sign before every gap in the track, with the speed it takes to jump it.
+function Placeholders.gapSigns(parent: Instance, layout: Layout.Layout)
+    local model = Instance.new("Model")
+    model.Name = "GapSigns"
+    model.Parent = parent
+    local cart = Configs.Run.Cart
+    for _, gap in layout.track.gaps do
+        local need = math.ceil(Jump.minSpeed(cart.Jump, gap))
+        local cruise = cart.Speed * (1 + cart.SlopeBoost * gap.grade)
+        local advice = if need > cruise then "NEED " .. need .. " — PUSH!" else "NEED " .. need .. " — DON'T BRAKE"
+        local at = TrackFrames.flat(layout.track, math.max(0, gap.from - 70))
+        sign(model, at * CFrame.new(0, 10, 0), "GAP AHEAD", advice)
+    end
 end
 
 -- The station: a floor around the parked cart and the lever that starts the run.

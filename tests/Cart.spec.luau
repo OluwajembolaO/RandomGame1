@@ -4,21 +4,59 @@ local Configs = require("../src/shared/Configs")
 local Upgrades = require("../src/shared/Rules/Upgrades")
 
 local stats = Cart.stats(Configs.Run.Cart, Upgrades.baseStats(Configs))
-local ROLLING = { moving = true, sharp = false, chewers = 0, chewDps = 0 }
+local pieces = Configs.Kit.Pieces
+local ROLLING = { moving = true, chewers = 0, chewDps = 0 }
+local DT = 1 / 60
 
 local function run(cart, seconds: number, conditions)
     local damage = 0
     for _ = 1, math.round(seconds * 60) do
-        damage += Cart.step(cart, stats, 1 / 60, conditions)
+        damage += Cart.step(cart, stats, DT, conditions)
     end
     return damage
 end
 
+local function on(id: string, curved: boolean)
+    local def = pieces[id]
+    return {
+        moving = true,
+        chewers = 0,
+        chewDps = 0,
+        grade = def.Drop / def.Length,
+        curvature = if curved then def.Turn / def.Length else 0,
+    }
+end
+
+-- Rolls up to cruise on straight tunnel, then through bend piece `id` with the crew holding `throttle` and
+-- leaning `lean`. Returns whether the cart tipped over, and the most it tilted.
+local function throughBend(id: string, throttle: number, lean: number): (boolean, number)
+    local cart = Cart.new(stats)
+    Cart.setThrottle(cart, throttle)
+    if throttle < 0 then
+        Cart.setThrottle(cart, 0)
+        run(cart, 10, on("Tunnel_Straight", false))
+        Cart.setThrottle(cart, -1)
+        run(cart, 3, on("Tunnel_Straight", false)) -- braking well before the bend
+    else
+        run(cart, 10, on("Tunnel_Straight", false))
+    end
+    Cart.setLean(cart, lean)
+    local conditions = on(id, true)
+    local along, peak = 0, 0
+    while along < pieces[id].Length and not Cart.tipped(cart) do
+        Cart.step(cart, stats, DT, conditions)
+        along += cart.speed * DT
+        peak = math.max(peak, cart.tilt)
+    end
+    return Cart.tipped(cart), peak
+end
+
 T.describe("Cart", function()
-    T.it("starts full and still", function()
+    T.it("starts full, still and level", function()
         local cart = Cart.new(stats)
         T.equal(cart.hp, stats.MaxHp)
         T.equal(cart.speed, 0)
+        T.equal(cart.tilt, 0)
     end)
 
     T.it("accelerates up to its speed and no further", function()
@@ -27,40 +65,121 @@ T.describe("Cart", function()
         T.near(cart.speed, stats.Speed, 1e-6)
     end)
 
-    T.it("slows to brake speed, then the brake releases and cools down", function()
+    T.it("slows to brake speed while the brake is held, for as long as it's held", function()
         local cart = Cart.new(stats)
         run(cart, 10, ROLLING)
-        T.truthy(Cart.pullBrake(cart, stats), "brake pulls")
-        T.falsy(Cart.pullBrake(cart, stats), "can't pull twice")
-        run(cart, 3, ROLLING)
+        Cart.setThrottle(cart, -1)
+        T.truthy(Cart.braking(cart), "braking")
+        run(cart, 30, ROLLING)
         T.near(cart.speed, stats.Speed * stats.BrakeFactor, 1e-6)
-        run(cart, stats.BrakeSeconds - 3 + 0.1, ROLLING)
-        T.falsy(Cart.braking(cart), "brake released")
-        T.falsy(Cart.pullBrake(cart, stats), "cooling down")
-        run(cart, stats.BrakeCooldown + 0.1, ROLLING)
-        T.truthy(Cart.pullBrake(cart, stats), "ready again")
+        Cart.setThrottle(cart, 0)
+        run(cart, 10, ROLLING)
+        T.near(cart.speed, stats.Speed, 1e-6)
     end)
 
-    T.it("takes damage on a sharp curve at full speed, but not when braked", function()
-        local sharp = { moving = true, sharp = true, chewers = 0, chewDps = 0 }
-        local fast = Cart.new(stats)
-        run(fast, 10, ROLLING)
-        T.truthy(run(fast, 2, sharp) > 0, "full speed hurts")
-
-        local braked = Cart.new(stats)
-        run(braked, 10, ROLLING)
-        Cart.pullBrake(braked, stats)
-        run(braked, 1.5, ROLLING) -- brake before the curve
-        T.near(run(braked, 2, sharp), 0, 1e-9)
+    T.it("runs faster while pushed", function()
+        local cart = Cart.new(stats)
+        Cart.setThrottle(cart, 1)
+        T.truthy(Cart.pushing(cart))
+        run(cart, 10, ROLLING)
+        T.near(cart.speed, stats.Speed * stats.PushFactor, 1e-6)
+        T.truthy(stats.PushFactor > 1, "pushing is faster than coasting")
     end)
 
-    T.it("brakes to a safe speed through a sharp curve", function()
-        T.truthy(stats.Speed * stats.BrakeFactor < stats.SafeCurveSpeed, "brake speed is safe")
-        T.truthy(stats.Speed > stats.SafeCurveSpeed, "full speed is not")
+    T.it("takes one throttle from the crew: anyone braking wins, then anyone pushing", function()
+        T.equal(Cart.crewThrottle({}), 0)
+        T.equal(Cart.crewThrottle({ 0, 0 }), 0)
+        T.equal(Cart.crewThrottle({ 0, 1 }), 1)
+        T.equal(Cart.crewThrottle({ 1, -1, 1 }), -1)
+        local cart = Cart.new(stats)
+        Cart.setThrottle(cart, 7)
+        T.equal(cart.throttle, 1)
+        Cart.setThrottle(cart, -0.4)
+        T.equal(cart.throttle, 0)
+        Cart.setThrottle(cart, 0 / 0)
+        T.equal(cart.throttle, 0, "NaN coasts")
+    end)
+
+    T.it("leans as a crew: everyone has to lean for the full effect", function()
+        T.equal(Cart.crewLean({}), 0)
+        T.equal(Cart.crewLean({ 1 }), 1)
+        T.equal(Cart.crewLean({ 1, 0, 0, 0 }), 0.25)
+        T.equal(Cart.crewLean({ 1, -1 }), 0)
+        T.equal(Cart.crewLean({ 5, 0 / 0 }), 0.5, "out-of-range and NaN leans are tamed")
+        local cart = Cart.new(stats)
+        Cart.setLean(cart, -3)
+        T.equal(cart.lean, -1)
+    end)
+
+    T.it("takes a normal bend at cruise speed without tipping", function()
+        local tipped, peak = throughBend("Tunnel_BendR", 0, 0)
+        T.falsy(tipped)
+        T.truthy(peak < 0.25, "barely lifts: " .. peak)
+        T.falsy((throughBend("Tunnel_BendL", 0, 0)), "left bends too")
+    end)
+
+    T.it("tips over in a sharp bend at cruise speed, unless the crew leans into it", function()
+        T.truthy((throughBend("Tunnel_SharpR", 0, 0)), "right")
+        T.truthy((throughBend("Tunnel_SharpL", 0, 0)), "left")
+        T.falsy((throughBend("Tunnel_SharpR", 0, 1)), "leaning right into a right bend")
+        T.falsy((throughBend("Tunnel_SharpL", 0, -1)), "leaning left into a left bend")
+    end)
+
+    T.it("tips over leaning the wrong way, even in a normal bend", function()
+        T.truthy((throughBend("Tunnel_BendR", 0, -1)))
+        T.truthy((throughBend("Tunnel_BendL", 0, 1)))
+    end)
+
+    T.it("tips over pushing through a bend without leaning", function()
+        T.truthy((throughBend("Tunnel_BendR", 1, 0)))
+    end)
+
+    T.it("never tips under the brake, not even in a sharp bend", function()
+        local tipped, peak = throughBend("Tunnel_SharpR", -1, 0)
+        T.falsy(tipped)
+        T.equal(peak, 0)
+    end)
+
+    T.it("settles back onto all four wheels once under the limit", function()
+        local cart = Cart.new(stats)
+        cart.tilt = 0.6
+        run(cart, 1, ROLLING)
+        T.equal(cart.tilt, 0)
+    end)
+
+    T.it("takes bends harder with Wide Axles", function()
+        local wide = table.clone(stats)
+        wide.TipLimit *= 1.2
+        T.near(Cart.tipLimit(wide, 0, 0.01), Cart.tipLimit(stats, 0, 0.01) * 1.2, 1e-9)
+        T.truthy(Cart.tipLimit(stats, 1, 0.01) > Cart.tipLimit(stats, 0, 0.01), "leaning in helps")
+        T.truthy(Cart.tipLimit(stats, -1, 0.01) < Cart.tipLimit(stats, 0, 0.01), "leaning out hurts")
+        T.equal(Cart.tipLimit(stats, 1, 0), stats.TipLimit, "leaning does nothing on a straight")
+    end)
+
+    T.it("shows the crew's lean and the lift onto its outer wheels in the cart's roll", function()
+        local cart = Cart.new(stats)
+        T.near(Cart.roll(cart, stats, 0), 0)
+        Cart.setLean(cart, 1)
+        T.truthy(Cart.roll(cart, stats, 0) < 0, "leaning right tips the top right")
+        Cart.setLean(cart, 0)
+        cart.tilt = 1
+        T.near(Cart.roll(cart, stats, 0.01), math.rad(stats.LiftMax), 1e-9, "lifts outward in a right bend")
+        T.near(Cart.roll(cart, stats, -0.01), -math.rad(stats.LiftMax), 1e-9, "and in a left bend")
+    end)
+
+    T.it("is pushed back onto the rails faster with more of the crew pushing", function()
+        T.equal(Cart.rightSeconds(stats, 1), stats.RightSeconds)
+        T.truthy(Cart.rightSeconds(stats, 4) < Cart.rightSeconds(stats, 2), "four beat two")
+        T.equal(Cart.rightSeconds(stats, 0), math.huge, "nobody pushing never rights it")
+        local cart = Cart.new(stats)
+        cart.speed, cart.tilt = 20, 1
+        Cart.righted(cart)
+        T.equal(cart.speed, 0)
+        T.falsy(Cart.tipped(cart))
     end)
 
     T.it("is chewed by crawlers, less with Chew Guard", function()
-        local chewing = { moving = true, sharp = false, chewers = 2, chewDps = 5 }
+        local chewing = { moving = true, chewers = 2, chewDps = 5 }
         T.near(run(Cart.new(stats), 1, chewing), 10, 1e-6)
         local guarded = table.clone(stats)
         guarded.ChewArmor = 0.5
@@ -84,22 +203,16 @@ T.describe("Cart", function()
 
     T.it("runs faster downhill and slower through bends", function()
         local downhill = Cart.new(stats)
-        run(downhill, 10, { moving = true, sharp = false, chewers = 0, chewDps = 0, grade = 0.0625 })
+        run(downhill, 10, { moving = true, chewers = 0, chewDps = 0, grade = 0.0625 })
         T.near(downhill.speed, stats.Speed * (1 + stats.SlopeBoost * 0.0625), 1e-6)
         local bend = Cart.new(stats)
-        run(bend, 10, { moving = true, sharp = false, chewers = 0, chewDps = 0, curvature = 0.016 })
+        run(bend, 10, { moving = true, chewers = 0, chewDps = 0, curvature = 0.016 })
         T.near(bend.speed, stats.Speed * (1 - stats.CurveDrag * 0.016), 1e-6)
         local braked = Cart.new(stats)
         run(braked, 10, ROLLING)
-        Cart.pullBrake(braked, stats)
-        run(braked, 3, { moving = true, sharp = false, chewers = 0, chewDps = 0, grade = 0.2 })
+        Cart.setThrottle(braked, -1)
+        run(braked, 3, { moving = true, chewers = 0, chewDps = 0, grade = 0.2 })
         T.near(braked.speed, stats.Speed * stats.BrakeFactor, 1e-6, "the brake ignores the slope")
-    end)
-
-    T.it("still needs the brake for a sharp bend, even with drag", function()
-        local sharpBend = math.rad(45) / 48 -- Tunnel_SharpR's curvature
-        local unbraked = stats.Speed * (1 - math.min(stats.CurveDragMax, stats.CurveDrag * sharpBend))
-        T.truthy(unbraked > stats.SafeCurveSpeed, "drag alone mustn't make sharp bends safe")
     end)
 
     T.it("leans outward in bends, more at speed, up to a limit", function()
@@ -113,7 +226,7 @@ T.describe("Cart", function()
     T.it("rolls to a stop at a station", function()
         local cart = Cart.new(stats)
         run(cart, 10, ROLLING)
-        run(cart, 10, { moving = false, sharp = false, chewers = 0, chewDps = 0 })
+        run(cart, 10, { moving = false, chewers = 0, chewDps = 0 })
         T.near(cart.speed, 0, 1e-6)
     end)
 end)

@@ -2,16 +2,24 @@
 -- Track geometry on plain numbers, so Lune can test it. Pieces (straights and curves, always sloping
 -- down; the cave kit's, see Rules/Kit) are sampled into points the cart follows by distance.
 -- Headings are radians in the XZ plane: direction = (cos h, 0, sin h). Server code turns points into CFrames.
+--
+-- A piece can have a gap: broken track from `from` to `to` (horizontal studs into the piece) whose far side
+-- sits `drop` studs lower. Heights follow one profile (Track.heightAt), which art/blender/build_cave_kit.py's
+-- path() copies exactly. The cart has to jump the gap (Rules/Jump).
 
 export type Vec = { x: number, y: number, z: number }
+export type GapDef = { from: number, to: number, drop: number }
 -- kind is "Straight" or "Curve" (string literal unions widen across modules; TRAPS #19).
-export type Piece = { kind: string, length: number, turn: number, grade: number, sharp: boolean }
+export type Piece = { kind: string, length: number, turn: number, grade: number, sharp: boolean, gap: GapDef? }
 export type Span = { from: number, to: number }
+-- A gap along the whole track: from/to are track distances, length is horizontal, grade is the approach's.
+export type Gap = { from: number, to: number, length: number, drop: number, grade: number }
 export type Track = {
     points: { Vec },
     distances: { number },
     length: number,
     sharp: { Span },
+    gaps: { Gap },
     startHeading: number,
     endHeading: number,
 }
@@ -20,11 +28,22 @@ export type Rules = { MaxStep: number, MinY: number, BaseHeading: number }
 
 local Track = {}
 
+-- How far above a piece's start the track is, `s` horizontal studs in (negative: it only goes down).
+function Track.heightAt(piece: Piece, s: number): number
+    local below = piece.grade * s
+    local gap = piece.gap
+    if gap then
+        below += gap.drop * math.clamp((s - gap.from) / (gap.to - gap.from), 0, 1)
+    end
+    return -below
+end
+
 -- Samples pieces into points about `step` studs apart, starting at `start` facing `heading`.
 function Track.build(pieces: { Piece }, start: Vec, heading: number, step: number): Track
     local points: { Vec } = { { x = start.x, y = start.y, z = start.z } }
     local distances = { 0 }
     local sharp: { Span } = {}
+    local gaps: { Gap } = {}
     local x, y, z, h = start.x, start.y, start.z, heading
     local travelled = 0
     for _, piece in pieces do
@@ -32,12 +51,17 @@ function Track.build(pieces: { Piece }, start: Vec, heading: number, step: numbe
         local ds = piece.length / count
         local dh = piece.turn / count
         local from = travelled
-        for _ = 1, count do
+        local gap = piece.gap
+        local gapFrom: number?, gapTo: number? = nil, nil
+        if gap and gap.from <= 0 then
+            gapFrom = travelled
+        end
+        for k = 1, count do
             -- Stepping along the midpoint heading keeps arcs accurate.
             local mid = h + dh / 2
             local dx = math.cos(mid) * ds
             local dz = math.sin(mid) * ds
-            local dy = -piece.grade * ds
+            local dy = Track.heightAt(piece, k * ds) - Track.heightAt(piece, (k - 1) * ds)
             x += dx
             y += dy
             z += dz
@@ -45,9 +69,21 @@ function Track.build(pieces: { Piece }, start: Vec, heading: number, step: numbe
             travelled += math.sqrt(dx * dx + dy * dy + dz * dz)
             table.insert(points, { x = x, y = y, z = z })
             table.insert(distances, travelled)
+            -- The gap's ends land on sampled points (Kit keeps them on whole steps).
+            if gap and not gapFrom and k * ds >= gap.from - 1e-6 then
+                gapFrom = travelled
+            end
+            if gap and not gapTo and k * ds >= gap.to - 1e-6 then
+                gapTo = travelled
+            end
         end
         if piece.sharp then
             table.insert(sharp, { from = from, to = travelled })
+        end
+        if gap and gapFrom and gapTo then
+            local span: Gap =
+                { from = gapFrom, to = gapTo, length = gap.to - gap.from, drop = gap.drop, grade = piece.grade }
+            table.insert(gaps, span)
         end
     end
     return {
@@ -55,6 +91,7 @@ function Track.build(pieces: { Piece }, start: Vec, heading: number, step: numbe
         distances = distances,
         length = travelled,
         sharp = sharp,
+        gaps = gaps,
         startHeading = heading,
         endHeading = h,
     }
@@ -72,6 +109,7 @@ function Track.concat(tracks: { Track }): Track
     local points: { Vec } = {}
     local distances: { number } = {}
     local sharp: { Span } = {}
+    local gaps: { Gap } = {}
     local offset = 0
     for index, track in tracks do
         for i = if index == 1 then 1 else 2, #track.points do
@@ -81,6 +119,15 @@ function Track.concat(tracks: { Track }): Track
         for _, span in track.sharp do
             table.insert(sharp, { from = span.from + offset, to = span.to + offset })
         end
+        for _, gap in track.gaps do
+            table.insert(gaps, {
+                from = gap.from + offset,
+                to = gap.to + offset,
+                length = gap.length,
+                drop = gap.drop,
+                grade = gap.grade,
+            })
+        end
         offset += track.length
     end
     return {
@@ -88,6 +135,7 @@ function Track.concat(tracks: { Track }): Track
         distances = distances,
         length = offset,
         sharp = sharp,
+        gaps = gaps,
         startHeading = tracks[1].startHeading,
         endHeading = tracks[#tracks].endHeading,
     }
@@ -141,6 +189,16 @@ function Track.sharpAt(track: Track, distance: number): boolean
         end
     end
     return false
+end
+
+-- The gap the cart is over or coming up to (the first that hasn't ended yet), or nil.
+function Track.nextGap(track: Track, distance: number): Gap?
+    for _, gap in track.gaps do
+        if gap.to > distance then
+            return gap
+        end
+    end
+    return nil
 end
 
 -- The next sharp curve that hasn't ended yet, or nil.
