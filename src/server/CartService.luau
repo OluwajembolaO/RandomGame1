@@ -62,7 +62,12 @@ local arrived = Instance.new("BindableEvent")
 local sinceReplicate = 0
 local sinceReseat = 0
 local sinceShake = 0
-local roll = 0 -- the cart body's current roll (radians), eased toward Cart.roll
+local roll = 0 -- the cart body's current roll (radians), rocking toward Cart.roll (Cart.rock)
+local rollSpeed = 0
+-- After landing a jump: the cart hopping on the rails (studs up, and its speed; Jump.bounce) and its nose
+-- rocking (radians, nose up positive; Cart.rock).
+local hop, hopSpeed = 0, 0
+local pitch, pitchSpeed = 0, 0
 
 type Mode = "Track" | "Flying" | "Falling" | "Derailed"
 local mode: Mode = "Track"
@@ -331,7 +336,7 @@ local function onRails(withRoll: number): CFrame
         local ahead = Split.offset(inSplit.span, inSplit.lane, distance + 1)
         frame *= CFrame.new(here, 0, 0) * CFrame.Angles(0, -math.atan(ahead - here), 0)
     end
-    return frame * CFrame.Angles(0, 0, withRoll)
+    return frame * CFrame.new(0, hop, 0) * CFrame.Angles(pitch, 0, withRoll)
 end
 
 local function pose()
@@ -428,7 +433,8 @@ function CartService.spawn(
     rolling = false
     locked = false
     chewers = 0
-    roll = 0
+    roll, rollSpeed = 0, 0
+    hop, hopSpeed, pitch, pitchSpeed = 0, 0, 0, 0
     mode, free, flight, junction = "Track", nil, nil, nil
 
     -- Pivot onto the track before parenting, so the unanchored parts never fall from the origin.
@@ -708,7 +714,8 @@ local function tipOver(side: number, immediate: boolean, lateral: number?)
         walkway = walkway(distance, 18 + 2 * math.abs(across)),
     }
     free = if immediate then resting else onRails(roll)
-    roll = 0
+    roll, rollSpeed = 0, 0
+    hop, hopSpeed, pitch, pitchSpeed = 0, 0, 0, 0
     makePrompt(resting.Position, (crash :: Crash).walkway)
     -- A long jump (hauled back up the line) is set directly on an anchored cart: clients can take seconds
     -- to see a physics assembly that moved that far.
@@ -802,7 +809,7 @@ end
 
 local function flyStep(current: Flight, dt: number)
     current.elapsed += dt
-    roll += (0 - roll) * math.min(1, dt * 4)
+    roll, rollSpeed = Cart.rock(stats, roll, rollSpeed, 0, dt)
     local across = current.speed * math.cos(math.rad(JUMP.Lip))
     local along = across * current.elapsed
     local landing = current.landing
@@ -810,8 +817,13 @@ local function flyStep(current: Flight, dt: number)
         if along >= landing then
             distance = alongToDistance(current.gap, landing)
             mode, flight, free = "Track", nil, nil
+            -- Not a flat landing: it bounces, slams its nose down and jolts sideways, harder the harder it hit.
+            local impact = Jump.impact(JUMP, current.speed, landing)
+            local kickRoll
+            hopSpeed, pitchSpeed, kickRoll = Jump.landingKick(JUMP, impact, math.random() * 2 - 1)
+            hop, rollSpeed = 0, rollSpeed + kickRoll
             local at = TrackFrames.position(track :: Track.Track, distance)
-            Remotes.Effect:FireAllClients("Shake", 0.6)
+            Remotes.Effect:FireAllClients("Shake", 0.4 + math.min(0.8, impact / 60))
             Remotes.Effect:FireAllClients("Sound", "Land", at)
             return
         end
@@ -853,7 +865,9 @@ local function trackStep(current: Track.Track, dt: number)
         grade = grade,
         curvature = curvature,
     })
-    roll += (Cart.roll(state, stats, curvature) - roll) * math.min(1, dt * 6)
+    roll, rollSpeed = Cart.rock(stats, roll, rollSpeed, Cart.roll(state, stats, curvature), dt)
+    hop, hopSpeed = Jump.bounce(JUMP, hop, hopSpeed, dt)
+    pitch, pitchSpeed = Cart.rock(stats, pitch, pitchSpeed, 0, dt)
     if Cart.tipped(state) then
         tipOver(if curvature >= 0 then 1 else -1, false)
         return

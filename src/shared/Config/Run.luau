@@ -33,6 +33,12 @@ return {
         TipRecover = 2.1,
         LeanTilt = 14, -- degrees the cart tilts toward the side the crew leans
         LiftMax = 28, -- degrees it lifts onto its outer wheels just before going over
+        -- How the cart body rocks toward that roll, like a heavy box on its wheels (Rules/Cart.rock): it swings
+        -- RockFrequency times a second and RockDamping (0..1) takes the swing out. Lower damping rocks more:
+        -- at 0.35, letting go of a 14 degree lean swings it about 4 degrees past upright, then 1 back, settled
+        -- in about 1.5 s.
+        RockFrequency = 1.3,
+        RockDamping = 0.35,
         -- Pushing a tipped cart back onto the rails: one player takes RightSeconds, each helper adds 60%.
         RightSeconds = 6,
         HelperBoost = 0.6,
@@ -49,6 +55,13 @@ return {
             RunUp = 140,
             FallSeconds = 1.2,
             WarnDistance = 240,
+            -- The landing bounce (Rules/Jump.landingKick), scaled by how hard the cart comes down: the first
+            -- hop keeps Restitution of the landing speed, the nose slams down at PitchKick radians a second
+            -- per stud a second (then rocks back like the lean, Rules/Cart.rock), and a random sideways jolt
+            -- of up to RollKick.
+            Restitution = 0.35,
+            PitchKick = 0.03,
+            RollKick = 0.012,
         },
         -- Momentum (Rules/Cart.targetSpeed): the tunnels' 6% grade makes the cart run ~20% faster, bends slow it.
         SlopeBoost = 3.2,

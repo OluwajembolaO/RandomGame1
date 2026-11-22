@@ -24,6 +24,8 @@ export type Stats = {
     TipRecover: number, -- how fast the tilt drains back under the limit, per second
     LeanTilt: number, -- degrees the cart body tilts toward the side the crew leans
     LiftMax: number, -- degrees the cart lifts onto its outer wheels just before tipping
+    RockFrequency: number, -- how many times a second the cart body swings as it rocks (Cart.rock)
+    RockDamping: number, -- how quickly the rocking dies away (0 never, 1 no overshoot)
     RightSeconds: number, -- how long one player takes to push a tipped cart back onto the rails
     HelperBoost: number, -- each extra player pushing adds this much speed
 }
@@ -65,6 +67,8 @@ function Cart.stats(config: any, upgraded: { [string]: number }): Stats
         TipRecover = config.TipRecover,
         LeanTilt = config.LeanTilt,
         LiftMax = config.LiftMax,
+        RockFrequency = config.RockFrequency,
+        RockDamping = config.RockDamping,
         RightSeconds = upgraded.RightSeconds,
         HelperBoost = config.HelperBoost,
     }
@@ -162,6 +166,22 @@ function Cart.roll(cart: Cart, stats: Stats, curvature: number): number
     return Cart.bank(stats, cart.speed, curvature)
         - math.rad(stats.LeanTilt) * cart.lean
         + math.rad(stats.LiftMax) * cart.tilt * outward
+end
+
+-- Moves the cart body's roll toward `target` (Cart.roll) the way a heavy box on its wheels would: a damped
+-- spring, so it swings a little past where it's going and rocks back before it settles, instead of easing
+-- straight there. `speed` is the roll's speed (radians a second); returns the new roll and speed. Steps
+-- itself in small slices, so it stays steady however long `dt` is.
+function Cart.rock(stats: Stats, roll: number, speed: number, target: number, dt: number): (number, number)
+    local omega = 2 * math.pi * stats.RockFrequency
+    local slices = math.max(1, math.ceil(dt * 240))
+    local h = dt / slices
+    for _ = 1, slices do
+        local push = omega * omega * (target - roll) - 2 * stats.RockDamping * omega * speed
+        speed += push * h
+        roll += speed * h
+    end
+    return roll, speed
 end
 
 function Cart.damage(cart: Cart, amount: number)

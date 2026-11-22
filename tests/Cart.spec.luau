@@ -167,6 +167,38 @@ T.describe("Cart", function()
         T.near(Cart.roll(cart, stats, -0.01), -math.rad(stats.LiftMax), 1e-9, "and in a left bend")
     end)
 
+    T.it("rocks back past upright when the crew stops leaning, then settles", function()
+        local leaned = math.rad(stats.LeanTilt)
+        local roll, speed = leaned, 0
+        local furthest, settled = 0, nil
+        for frame = 1, 60 * 4 do
+            roll, speed = Cart.rock(stats, roll, speed, 0, 1 / 60)
+            furthest = math.min(furthest, roll)
+            if not settled and frame > 30 and math.abs(roll) < leaned * 0.03 and math.abs(speed) < 0.02 then
+                settled = frame / 60
+            end
+        end
+        T.truthy(furthest < -leaned * 0.1, "swings past upright the other way")
+        T.truthy(furthest > -leaned * 0.6, "but not wildly")
+        T.truthy(settled and settled < 2.5, "settles within a couple of seconds, took " .. tostring(settled))
+        T.near(roll, 0, leaned * 0.01, "and comes to rest upright")
+    end)
+
+    T.it("rocks into a lean the same way, and stays steady on a long frame", function()
+        local target = -math.rad(stats.LeanTilt)
+        local roll, speed = 0, 0
+        local beyond = 0
+        for _ = 1, 60 * 3 do
+            roll, speed = Cart.rock(stats, roll, speed, target, 1 / 60)
+            beyond = math.min(beyond, roll)
+        end
+        T.truthy(beyond < target, "leans a little past before it settles")
+        T.near(roll, target, math.abs(target) * 0.02)
+        local slow, slowSpeed = Cart.rock(stats, 0, 0, target, 0.5)
+        T.truthy(slow == slow and math.abs(slow) < math.abs(target) * 2, "a half-second frame doesn't blow up")
+        T.truthy(slowSpeed == slowSpeed, "no NaN")
+    end)
+
     T.it("is pushed back onto the rails faster with more of the crew pushing", function()
         T.equal(Cart.rightSeconds(stats, 1), stats.RightSeconds)
         T.truthy(Cart.rightSeconds(stats, 4) < Cart.rightSeconds(stats, 2), "four beat two")
