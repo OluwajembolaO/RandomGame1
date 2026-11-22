@@ -169,17 +169,43 @@ T.describe("Config", function()
     T.it("gives every sound a real asset id and a sane volume", function()
         local Sounds = require("../src/shared/Config/Sounds")
         local count = 0
+        local function check(where: string, spec: any)
+            count += 1
+            T.truthy(type(spec.Id) == "number" and spec.Id > 0 and spec.Id % 1 == 0, where .. " Id")
+            T.truthy(spec.Volume > 0 and spec.Volume <= 2, where .. " Volume")
+        end
         for sectionName, section in Sounds do
-            if type(section) == "table" then
+            if sectionName ~= "Acoustics" then
                 for name, spec in section do
-                    count += 1
-                    local where = sectionName .. "." .. name
-                    T.truthy(type(spec.Id) == "number" and spec.Id > 0 and spec.Id % 1 == 0, where .. " Id")
-                    T.truthy(spec.Volume > 0 and spec.Volume <= 2, where .. " Volume")
+                    if spec.Sounds then
+                        for index, entry in spec.Sounds do
+                            check(sectionName .. "." .. name .. "[" .. index .. "]", entry)
+                        end
+                    else
+                        check(sectionName .. "." .. name, spec)
+                    end
                 end
             end
         end
         T.truthy(count >= 10, "expected the full sound set, found " .. count)
+    end)
+
+    T.it("keeps the cave acoustics in Roblox's ranges", function()
+        local Acoustics = require("../src/shared/Config/Sounds").Acoustics
+        for _, name in { "Tunnel", "Cavern", "Chamber" } do
+            local space = Acoustics[name]
+            T.truthy(space, "missing " .. name)
+            T.truthy(space.DecayTime >= 0.1 and space.DecayTime <= 20, name .. " DecayTime")
+            T.truthy(space.Density >= 0 and space.Density <= 1, name .. " Density")
+            T.truthy(space.Diffusion >= 0 and space.Diffusion <= 1, name .. " Diffusion")
+            T.truthy(space.EchoDelay >= 0.01 and space.EchoDelay <= 1, name .. " EchoDelay")
+            T.truthy(space.EchoFeedback >= 0 and space.EchoFeedback < 1, name .. " EchoFeedback")
+            for _, level in { "Wet", "Dry", "EchoWet" } do
+                T.truthy(space[level] >= -80 and space[level] <= 0, name .. " " .. level)
+            end
+            T.truthy(space.HighGain >= -80 and space.HighGain <= 10, name .. " HighGain")
+        end
+        T.truthy(Acoustics.Cavern.DecayTime > Acoustics.Tunnel.DecayTime, "caverns ring longer than tunnels")
     end)
 
     T.it("makes every gap jumpable by pushing, and never under the brake", function()

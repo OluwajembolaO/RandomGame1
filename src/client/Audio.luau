@@ -1,13 +1,16 @@
 --!strict
 -- The game's sound, made on each client from Config/Sounds. The cart's sounds ride on the cart and follow
--- its speed, brake and sparks (read from RunInfo, like CartFx); the cave hums and drips around you; one-off
--- sounds (lever, rivets, impacts) play at a point in the world. Everything gets Roblox's cave reverb.
+-- its speed, brake, sparks and the crew's lean (read from RunInfo, like CartFx); the cave hums, drips,
+-- rumbles and trickles around you; one-off sounds (lever, rivets, impacts) play at a point in the world.
+-- Every sound group, footsteps included, echoes like the part of the cave the cart is in (client/Acoustics).
 
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
+
+local Acoustics = require(script.Parent.Acoustics)
 
 local Shared = ReplicatedStorage.Shared
 local Configs = require(Shared.Configs)
@@ -32,6 +35,7 @@ local function group(name: string, volume: number): SoundGroup
     created.Name = name
     created.Volume = volume
     created.Parent = SoundService
+    Acoustics.dress(created)
     groups[name] = created
     return created
 end
@@ -54,8 +58,8 @@ local function make(
     return sound
 end
 
--- A one-off sound at a point in the world (it cleans itself up).
-function Audio.at(name: string, position: Vector3, pitch: number?)
+-- A one-off sound at a point in the world (it cleans itself up), at `loudness` times its usual volume.
+function Audio.at(name: string, position: Vector3, pitch: number?, loudness: number?)
     local sections: { any } = { Sounds.Cart, Sounds.Station, Sounds.Weapons, Sounds.Cave }
     local spec = nil
     for _, section in sections do
@@ -68,6 +72,7 @@ function Audio.at(name: string, position: Vector3, pitch: number?)
     anchor.WorldPosition = position
     anchor.Parent = workspace.Terrain
     local sound = make(spec, anchor, group("Effects", 1), false)
+    sound.Volume *= loudness or 1
     sound.PlaybackSpeed = pitch or (0.92 + math.random() * 0.16)
     sound:Play()
     Debris:AddItem(anchor, math.max(2, sound.TimeLength + 0.5) + 6)
@@ -107,6 +112,9 @@ local function startCart()
     local current: CartSounds? = nil
     local wasBraking = false
     local untilCreak = 4
+    local leanWas = 0
+    local untilStrain = 0
+    local lastShift = -math.huge
     RunService.Heartbeat:Connect(function(dt: number)
         local run = workspace:FindFirstChild("Run")
         local cart = run and run:FindFirstChild("Cart")
@@ -154,26 +162,80 @@ local function startCart()
         end
         wasBraking = braking
 
+        -- The crew throwing their weight over: the cart shifts with a creak and a clunk, and keeps straining
+        -- (louder the harder they lean) while they hold it.
+        local reportedLean = RunInfo.get("Lean")
+        local lean = if type(reportedLean) == "number" then reportedLean else 0
+        local leaning = math.abs(lean) >= 0.3
+        local started = leaning and (math.abs(leanWas) < 0.3 or math.sign(lean) ~= math.sign(leanWas))
+        if started and os.clock() - lastShift >= spec.LeanShift.Cooldown then
+            lastShift = os.clock()
+            local side = root.CFrame.RightVector * math.sign(lean) * 2
+            Audio.at("LeanShift", root.Position + side, 0.9 + math.random() * 0.2)
+            untilStrain = 0.8
+        elseif leaning then
+            untilStrain -= dt
+            if untilStrain <= 0 then
+                Audio.at("LeanStrain", root.Position, 0.8 + math.random() * 0.35, 0.6 + 0.4 * math.abs(lean))
+                local every = spec.LeanStrain.Every
+                untilStrain = every[1] + math.random() * (every[2] - every[1])
+            end
+        end
+        leanWas = lean
+
         -- Timber and iron groan now and then, much more often while leaning into a bend.
         if speed > 2 then
             untilCreak -= dt
             if untilCreak <= 0 then
                 Audio.at("Creak", root.Position, 0.85 + math.random() * 0.3)
-                local leaning = math.abs(root.CFrame.RightVector.Y) > 0.05
-                local every = if leaning then spec.Creak.BendEvery else spec.Creak.Every
+                local banked = math.abs(root.CFrame.RightVector.Y) > 0.05
+                local every = if banked then spec.Creak.BendEvery else spec.Creak.Every
                 untilCreak = every[1] + math.random() * (every[2] - every[1])
             end
         end
     end)
 end
 
--- The cave around you: a low drone and ambience bed, and water dripping somewhere close every few seconds.
+-- Somewhere off in the dark, out of sight: a boom far below, timbers cracking, rocks falling, bat wings.
+local function distant(around: Vector3)
+    local spec = Sounds.Cave.Distant
+    local pick = spec.Sounds[math.random(#spec.Sounds)]
+    local angle = math.random() * 2 * math.pi
+    local reach = spec.Range[1] + math.random() * (spec.Range[2] - spec.Range[1])
+    local at = around + Vector3.new(math.cos(angle) * reach, -10 + math.random() * 30, math.sin(angle) * reach)
+    local anchor = Instance.new("Attachment")
+    anchor.WorldPosition = at
+    anchor.Parent = workspace.Terrain
+    local sound = make(pick, anchor, group("Effects", 1), false)
+    sound.RollOffMinDistance = 30
+    sound.RollOffMaxDistance = 260
+    sound.PlaybackSpeed = 0.8 + math.random() * 0.3
+    sound:Play()
+    Debris:AddItem(anchor, 12)
+end
+
+-- The cave around you: a low drone and ambience bed, water running in the caverns with a lake, dripping
+-- somewhere close every few seconds, and now and then something off in the dark (more often in caverns).
 local function startCave()
     local ambience = group("Ambience", 0.9)
     for _, spec in { Sounds.Cave.Drone, Sounds.Cave.Ambience } do
         local bed = make(spec, SoundService, ambience, true)
         bed:Play()
     end
+    local water = make(Sounds.Cave.Water, SoundService, ambience, true)
+    water.Volume = 0
+    local untilDistant = 3
+    RunService.Heartbeat:Connect(function(dt: number)
+        local space, lake = Acoustics.current()
+        fade(water, if lake and space == "Cavern" then Sounds.Cave.Water.Volume else 0, dt * 0.4)
+        untilDistant -= dt
+        local character = Players.LocalPlayer.Character
+        if untilDistant <= 0 and character then
+            distant(character:GetPivot().Position)
+            local every = if space == "Cavern" then Sounds.Cave.Distant.CavernEvery else Sounds.Cave.Distant.Every
+            untilDistant = every[1] + math.random() * (every[2] - every[1])
+        end
+    end)
     local drip = Sounds.Cave.Drip
     local untilDrip = 2
     RunService.Heartbeat:Connect(function(dt: number)
@@ -195,8 +257,35 @@ end
 
 local IMPACT_EVERY = 1.2 -- the server shakes every 0.35 s up on two wheels; one knock per this long is plenty
 
+-- Footsteps, jumps and landings (Roblox's character sounds) echo through the cave too.
+local function echoCharacterSounds()
+    local steps = group("Steps", 1)
+    local function claim(instance: Instance)
+        if instance:IsA("Sound") and instance.SoundGroup == nil then
+            instance.SoundGroup = steps
+        end
+    end
+    local function watch(character: Model)
+        for _, descendant in character:GetDescendants() do
+            claim(descendant)
+        end
+        character.DescendantAdded:Connect(claim)
+    end
+    local function follow(player: Player)
+        if player.Character then
+            watch(player.Character)
+        end
+        player.CharacterAdded:Connect(watch)
+    end
+    for _, player in Players:GetPlayers() do
+        follow(player)
+    end
+    Players.PlayerAdded:Connect(follow)
+end
+
 function Audio.start()
-    SoundService.AmbientReverb = (Enum.ReverbType :: any)[Sounds.Reverb] or Enum.ReverbType.Cave
+    Acoustics.start()
+    echoCharacterSounds()
     startCave()
     startCart()
     local lastImpact = 0
