@@ -45,15 +45,32 @@ T.describe("Config", function()
                 expect(kit.Stop, "Stop")
                 expect(kit.Cap, "Cap")
                 expect(kit.Straight, "Tunnel")
-                for _, id in kit.Bends do
-                    expect(id, "Tunnel")
+                local KIND_OF_TAG = { Cavern = "Cavern", Sharp = "Tunnel", Bend = "Tunnel", Gap = "Tunnel" }
+                local seen = {}
+                for _, chunk in kit.Chunks do
+                    T.falsy(seen[chunk.Id], zone.Id .. " lists " .. chunk.Id .. " twice")
+                    seen[chunk.Id] = true
+                    T.truthy(chunk.Weight > 0, chunk.Id .. " Weight")
+                    local def = pieces[chunk.Id]
+                    T.truthy(def, zone.Id .. " uses missing kit piece " .. chunk.Id)
+                    if chunk.Tag then
+                        expect(chunk.Id, KIND_OF_TAG[chunk.Tag] or def.Kind)
+                    end
+                    T.equal(def.Sharp, chunk.Tag == "Sharp", chunk.Id .. " is tagged Sharp exactly when it's sharp")
+                    T.equal(def.Gap ~= nil and def.Kind == "Tunnel", chunk.Tag == "Gap", chunk.Id .. " Gap tag")
+                    for _, id in chunk.After or {} do
+                        T.truthy(pieces[id], chunk.Id .. " After uses missing piece " .. id)
+                    end
                 end
-                for _, id in kit.Sharps do
-                    expect(id, "Tunnel")
-                    T.truthy(pieces[id].Sharp, id .. " is meant to be sharp")
+                T.truthy(seen[kit.Straight], zone.Id .. " pool needs its Straight")
+                for tag, rule in kit.Tags do
+                    T.truthy(
+                        rule.Spacing[1] >= 1 and rule.Spacing[2] >= rule.Spacing[1],
+                        zone.Id .. " " .. tag .. " Spacing"
+                    )
                 end
-                for _, id in kit.Caverns do
-                    expect(id, "Cavern")
+                for _, tag in kit.EveryLeg do
+                    T.truthy(kit.Tags[tag], zone.Id .. " EveryLeg tag " .. tag .. " has no rule")
                 end
                 T.truthy(kit.MaxHeading < math.pi / 2, zone.Id .. " MaxHeading must stay under 90 degrees")
             end
@@ -93,18 +110,18 @@ T.describe("Config", function()
     end)
 
     T.it("keeps the whole built descent above FallenPartsDestroyHeight", function()
-        local steepest = 0
-        for _, def in pieces do
-            steepest = math.max(steepest, def.Drop / def.Length)
-        end
-        local lowest = Configs.Run.StationHeight
-        for _, zone in Configs.Zones do
-            for _, leg in zone.Legs or {} do
-                -- A leg can overshoot its length by up to one cavern.
-                lowest -= (leg.Ride.Length + 224) * steepest
+        local Layout = require("../src/shared/Rules/Layout")
+        local Route = require("../src/shared/Rules/Route")
+        local zone = Configs.Zones[1]
+        local lowest = math.huge
+        for seed = 1, 200 do
+            local layout = Layout.build(Route.generate(zone, seed), zone.Kit, pieces, Layout.spec(Configs.Run))
+            for _, point in layout.track.points do
+                lowest = math.min(lowest, point.y)
             end
         end
-        T.truthy(lowest > -400, "descent bottoms out at y=" .. lowest)
+        -- Falling into a chasm takes the cart about 70 studs below the rails before it's hauled back.
+        T.truthy(lowest - 150 > -500, "descent bottoms out at y=" .. lowest)
     end)
 
     T.it("has valid upgrades", function()

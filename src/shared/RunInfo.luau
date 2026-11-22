@@ -2,7 +2,8 @@
 -- Run state the server shares with every client, as attributes on ReplicatedStorage.RunInfo.
 -- Keys: Phase, Zone, Leg, Legs, Stop, StopGenre, Seed, Countdown, Message,
 -- CartHp, CartMaxHp, Braking, Pushing, BrakeLeft (1 cold .. 0 overheating), BrakeHot, Speed,
--- SharpIn (studs to the next sharp curve, -1 for none), CaveSeed.
+-- SharpIn (studs to the next sharp curve, -1 for none), Segment / Segments (the numbered cave segment the
+-- cart is on, of how many), Distance (the cart's distance along the track).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")

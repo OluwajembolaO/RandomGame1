@@ -40,6 +40,42 @@ T.describe("Layout", function()
         T.equal(#segments, 2 + 2 * #zone.Legs)
     end)
 
+    T.it("numbers the ride's segments 1 to 30 through the whole run", function()
+        local total = 0
+        for _, legSpec in zone.Legs do
+            total += legSpec.Ride.Segments
+        end
+        T.equal(total, 30)
+        for seed = 1, 20 do
+            local result = layout(seed)
+            T.equal(result.count, total)
+            local expected = 1
+            for _, placement in result.placements do
+                if placement.number > 0 then
+                    T.equal(placement.number, expected, "seed " .. seed)
+                    T.truthy(placement.leg >= 1, "numbered segments are on a leg")
+                    expected += 1
+                else
+                    T.equal(placement.leg, 0)
+                end
+            end
+            T.equal(expected - 1, total)
+        end
+    end)
+
+    T.it("finds the segment under any distance", function()
+        local result = layout(7)
+        T.equal(Layout.numberAt(result, result.parked), 0, "none yet at the station")
+        for _, placement in result.placements do
+            local middle = (placement.from + placement.to) / 2
+            T.equal(result.placements[Layout.placementAt(result, middle)], placement)
+            if placement.number > 0 then
+                T.equal(Layout.numberAt(result, middle), placement.number)
+            end
+        end
+        T.equal(Layout.numberAt(result, result.track.length), result.count, "the last one by the end")
+    end)
+
     T.it("places pieces end to end along the track", function()
         local result = layout(4)
         for i, placement in result.placements do

@@ -9,7 +9,6 @@ local CartService = require(script.Parent.CartService)
 local KitBuilder = require(script.Parent.KitBuilder)
 local Placeholders = require(script.Parent.Placeholders)
 local Survivors = require(script.Parent.Survivors)
-local TrackDresser = require(script.Parent.TrackDresser)
 local Weapons = require(script.Parent.Weapons)
 local World = require(script.Parent.World)
 
@@ -106,8 +105,9 @@ local function runOnce()
     assert(ok, "bad route: " .. tostring(problem))
     local layout = Layout.build(route, zone.Kit, Configs.Kit.Pieces, Layout.spec(run))
 
-    RunInfo.set("Seed", seed)
-    RunInfo.set("CaveSeed", 0) -- set to the seed once the cave is built
+    RunInfo.set("Seed", seed) -- clients lay the same route out from it (the HUD's depth meter)
+    RunInfo.set("Segments", layout.count)
+    RunInfo.set("Segment", 0)
     RunInfo.set("Zone", zone.Name)
     RunInfo.set("Legs", #route.legs)
     RunInfo.set("Leg", 0)
@@ -115,12 +115,12 @@ local function runOnce()
     RunInfo.set("StopGenre", "")
     World.mood(zone)
     message("Digging out the mine...")
-    KitBuilder.build(layout, zone, folder)
-    -- Clients light the cave themselves from the same layout (CaveLights; TRAPS #42).
-    RunInfo.set("CaveSeed", seed)
-    message("Laying the rails...")
-    TrackDresser.dress(layout, zone, folder)
-    Placeholders.gapSigns(folder, layout)
+    -- The cave is built a few segments at a time around the cart as it rides, like DOORS rooms. Until this
+    -- run's cart exists, around the station.
+    local cartReady = false
+    KitBuilder.stream(layout, zone, folder, layout.parked, function(): number
+        return if cartReady then CartService.distance() else layout.parked
+    end)
     local stationFloor, stationLength = World.chamber(layout, layout.segments[1])
     local station = Placeholders.station(folder, stationFloor, stationLength, zone.Palette)
     Survivors.setSpawn(station.spawn)
@@ -129,6 +129,7 @@ local function runOnce()
     local stats = Upgrades.apply(Upgrades.baseStats(Configs), Configs.Upgrades, owned)
     Weapons.setStats(stats)
     CartService.spawn(folder, layout.track, layout.parked, zone.Palette, Cart.stats(run.Cart, stats))
+    cartReady = true
     for _, player in Players:GetPlayers() do
         Survivors.spawn(player)
     end

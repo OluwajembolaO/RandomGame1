@@ -45,6 +45,8 @@ Rules learned the hard way. Each one says what broke, the rule, and why. Add one
 
 45. **After a long move, clients can see a physics assembly in its old place for seconds, and its ProximityPrompts don't show.** The cart was hauled back 100+ studs by its AlignPosition. Its new position took more than 2.5 s to reach the client, and a prompt parented to the cart never showed or took input, even after toggling `Enabled`. A prompt on a plain part showed at once. For a long move, anchor the assembly and set its CFrame (a property change reaches clients right away). Put prompts on their own anchored marker part.
 
+46. **`rojo syncback` can't reach content made in a place opened from Roblox.** It reads a local `.rbxl`, and the Studio session is the cloud place. The Studio MCP can't write files either: its HTTP calls to localhost are blocked by the assistant's allowlist, and passing a serialized model back through the chat is far too big. So have the user right-click the instances and choose Save to File (a whole folder at once is fine). Then split the file into `assets/Content/...` with Lune (`@lune/roblox` deserializeModel / serializeModel). Processing a kit import is `art/studio/process_kit_import.luau`.
+
 ## World look
 
 15. **Size BillboardGuis in studs (`UDim2.fromScale`), not pixels.** Pixel-sized signs stay the same size up close and cover the HUD. In studs they shrink with distance like real signs.

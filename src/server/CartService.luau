@@ -904,6 +904,7 @@ local function replicate(current: Track.Track)
     RunInfo.set("GapNeed", if gap then math.ceil(Jump.minSpeed(JUMP, gap)) else 0)
     local speed = if flight then flight.speed elseif onTrack then state.speed else 0
     RunInfo.set("Speed", math.round(speed))
+    RunInfo.set("Distance", math.floor(distance)) -- along the track, for the HUD's depth meter
 end
 
 RunService.Heartbeat:Connect(function(dt)

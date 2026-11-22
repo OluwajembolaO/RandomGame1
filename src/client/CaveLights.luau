@@ -1,9 +1,10 @@
 --!strict
--- Lights the cave on this client. The server builds the cave's meshes and publishes the run's seed as
--- RunInfo.CaveSeed once they're in place; this lays the same route out from that seed (Rules/Layout is
--- deterministic, so it matches the server piece for piece) and makes every kit light locally, each on its
--- own small part. Every light starts switched off: Fx switches it on once the camera is near, because a
--- light that's on from the start, before the camera gets there, lit nothing (TRAPS #42).
+-- Lights the cave on this client. The server builds the cave a few chunks at a time around the cart
+-- (server/KitBuilder.stream), each a model under workspace.Run.Cave pivoted at its chunk's frame and tagged
+-- with its kit Piece. As each one arrives this makes its kit lights locally, each on its own small part,
+-- and when the server removes it, its lights go too. Every light starts switched off: Fx switches it on
+-- once the camera is near, because a light that's on from the start, before the camera gets there, lit
+-- nothing (TRAPS #42).
 -- Lights are tagged for Fx: "KitLight" (switched off when far), "Flicker" (lanterns) and "Pulse" (crystals).
 
 local CollectionService = game:GetService("CollectionService")
@@ -11,18 +12,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage.Shared
 local Configs = require(Shared.Configs)
-local Layout = require(Shared.Rules.Layout)
-local Route = require(Shared.Rules.Route)
-local RunInfo = require(Shared.RunInfo)
-local TrackFrames = require(Shared.TrackFrames)
 
 local MAX_RANGE = 60 -- Roblox's cap
-local PIECES_PER_FRAME = 4
 
 local CaveLights = {}
 
 local folder: Folder? = nil
-local generation = 0
+local lit: { [Instance]: Folder } = {} -- each lit chunk's lights
 
 local function rgb(color: { number }): Color3
     return Color3.fromRGB(color[1], color[2], color[3])
@@ -80,51 +76,77 @@ local function addShaft(parent: Instance, top: Vector3, zone: any)
     CollectionService:AddTag(spot, "KitLight")
 end
 
-local function build(seed: number)
-    generation += 1
-    local mine = generation
-    if folder then
-        folder:Destroy()
-        folder = nil
+-- Lights one chunk the server just built: its kit lights and shaft spotlights, placed from Config/KitData
+-- relative to the chunk's pivot.
+local function lightChunk(chunk: Instance)
+    local container = folder
+    if not container or not chunk:IsA("Model") then
+        return
     end
-    if seed == 0 then
-        return -- the server is building a new cave; lights come when it publishes the seed
+    local def = Configs.Kit.Pieces[chunk:GetAttribute("Piece") :: any]
+    if not def then
+        return
     end
     local zone = Configs.Zones[1]
-    local layout = Layout.build(Route.generate(zone, seed), zone.Kit, Configs.Kit.Pieces, Layout.spec(Configs.Run))
+    local frame = chunk:GetPivot()
+    local group = Instance.new("Folder")
+    group.Name = chunk.Name
+    for _, entry in def.Lights do
+        addLight(group, frame:PointToWorldSpace(vector(entry.Position)), entry, zone)
+    end
+    for _, entry in def.Shafts do
+        addShaft(group, frame:PointToWorldSpace(vector(entry.Top)), zone)
+    end
+    group.Parent = container
+    lit[chunk] = group
+end
+
+local function unlightChunk(chunk: Instance)
+    local group = lit[chunk]
+    if group then
+        group:Destroy()
+        lit[chunk] = nil
+    end
+end
+
+-- Follows a run's Cave folder: lights each chunk as it arrives and puts its lights out when it goes.
+local function watchCave(cave: Instance)
+    for chunk in lit do
+        unlightChunk(chunk)
+    end
+    for _, chunk in cave:GetChildren() do
+        lightChunk(chunk)
+    end
+    cave.ChildAdded:Connect(lightChunk)
+    cave.ChildRemoved:Connect(unlightChunk)
+end
+
+local function watchRun(run: Instance)
+    local cave = run:FindFirstChild("Cave")
+    if cave then
+        watchCave(cave)
+    end
+    run.ChildAdded:Connect(function(child)
+        if child.Name == "Cave" then
+            watchCave(child)
+        end
+    end)
+end
+
+function CaveLights.start()
     local container = Instance.new("Folder")
     container.Name = "CaveLights"
     container.Parent = workspace
     folder = container
-    for index, placement in layout.placements do
-        if mine ~= generation then
-            return -- a newer cave replaced this one while it was being lit
-        end
-        local def = Configs.Kit.Pieces[placement.piece]
-        local frame = TrackFrames.piece(placement.position, placement.heading)
-        local group = Instance.new("Folder")
-        group.Name = placement.piece
-        for _, entry in def.Lights do
-            addLight(group, frame:PointToWorldSpace(vector(entry.Position)), entry, zone)
-        end
-        for _, entry in def.Shafts do
-            addShaft(group, frame:PointToWorldSpace(vector(entry.Top)), zone)
-        end
-        group.Parent = container
-        if index % PIECES_PER_FRAME == 0 then
-            task.wait()
-        end
+    local run = workspace:FindFirstChild("Run")
+    if run then
+        watchRun(run)
     end
-end
-
-function CaveLights.start()
-    RunInfo.changed("CaveSeed", function(seed)
-        task.spawn(build, if type(seed) == "number" then seed else 0)
+    workspace.ChildAdded:Connect(function(child)
+        if child.Name == "Run" then
+            watchRun(child)
+        end
     end)
-    local current = RunInfo.get("CaveSeed")
-    if type(current) == "number" and current ~= 0 then
-        task.spawn(build, current)
-    end
 end
 
 return CaveLights

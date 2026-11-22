@@ -3,6 +3,7 @@
 -- except across caverns, where the Blender kit's timber trestle carries the track instead. Nothing over a
 -- gap (broken track the cart has to jump; Rules/Jump), just twisted rail ends and splintered sleepers at
 -- each edge. Everything else around the track (shoring, trestles, lanterns) comes with the kit pieces.
+-- Dressed one chunk at a time, as KitBuilder builds each segment ahead of the cart.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -17,15 +18,6 @@ local TrackFrames = require(Shared.TrackFrames)
 local trackConfig = Configs.Run.Track
 
 local TrackDresser = {}
-
-local function onTrestle(spans: { Layout.Placement }, distance: number): boolean
-    for _, span in spans do
-        if distance >= span.from and distance <= span.to then
-            return true
-        end
-    end
-    return false
-end
 
 local function inGap(gaps: { Track.Gap }, distance: number): boolean
     for _, gap in gaps do
@@ -64,8 +56,22 @@ local function brokenEdge(folder: Instance, frame: CFrame, facing: number, railC
     )
 end
 
--- Lays every rail, sleeper and bit of ballast for the run.
-function TrackDresser.dress(layout: Layout.Layout, zone: any, parent: Instance)
+-- The index of the first track point at or after `distance`.
+local function pointAt(distances: { number }, distance: number): number
+    local low, high = 1, #distances
+    while low < high do
+        local mid = (low + high) // 2
+        if distances[mid] < distance - 1e-6 then
+            low = mid + 1
+        else
+            high = mid
+        end
+    end
+    return low
+end
+
+-- Lays the rails, sleepers and ballast along one placed chunk (Layout.Placement), into `parent`.
+function TrackDresser.dress(layout: Layout.Layout, placement: Layout.Placement, zone: any, parent: Instance)
     local folder = Instance.new("Folder")
     folder.Name = "Track"
     folder.Parent = parent
@@ -75,24 +81,24 @@ function TrackDresser.dress(layout: Layout.Layout, zone: any, parent: Instance)
     local railColor = World.color(palette.Rail)
     local ballast = World.color(palette.RockDark)
     local timber = World.color(palette.Timber)
-    local trestles = Layout.placementsOf(layout, Configs.Kit.Pieces, "Cavern")
+    local elevated = Configs.Kit.Pieces[placement.piece].Kind == "Cavern"
     local gaps = layout.track.gaps
     local points, distances = layout.track.points, layout.track.distances
     local function brokenAt(index: number): boolean
         return inGap(gaps, (distances[index] + distances[index + 1]) / 2)
     end
 
-    -- Straight runs of points share one rail part; a run never crosses onto or off a trestle or a gap.
-    local i = 1
-    while i < #points do
+    -- Straight runs of points share one rail part; a run never crosses onto or off a gap. Chunks end on
+    -- sampled points, so each chunk's rails stop exactly where the next one's start.
+    local i = pointAt(distances, placement.from)
+    local last = pointAt(distances, placement.to)
+    while i < last do
         local a = TrackFrames.vector(points[i])
         local direction = (TrackFrames.vector(points[i + 1]) - a).Unit
-        local elevated = onTrestle(trestles, distances[i])
         local broken = brokenAt(i)
         local j = i + 1
         while
-            j < #points
-            and onTrestle(trestles, distances[j]) == elevated
+            j < last
             and brokenAt(j) == broken
             and (TrackFrames.vector(points[j + 1]) - TrackFrames.vector(points[j])).Unit:Dot(direction) > 0.99995
         do
@@ -126,8 +132,10 @@ function TrackDresser.dress(layout: Layout.Layout, zone: any, parent: Instance)
         i = j
     end
 
-    local distance = 0
-    while distance <= layout.track.length do
+    -- Sleepers on a grid along the whole track, so they're evenly spaced across chunk joins.
+    local spacing = if elevated then 4 else 8
+    local distance = math.ceil(placement.from / spacing) * spacing
+    while distance < placement.to do
         if not inGap(gaps, distance) then
             World.part(
                 folder,
@@ -138,12 +146,19 @@ function TrackDresser.dress(layout: Layout.Layout, zone: any, parent: Instance)
                 Enum.Material.Wood
             )
         end
-        distance += if onTrestle(trestles, distance) then 4 else 8
+        distance += spacing
     end
 
+    local function inside(at: number): boolean
+        return at >= placement.from and at < placement.to
+    end
     for _, gap in gaps do
-        brokenEdge(folder, TrackFrames.frame(layout.track, gap.from - 2), -1, railColor, timber)
-        brokenEdge(folder, TrackFrames.frame(layout.track, gap.to + 2), 1, railColor, timber)
+        if inside(gap.from - 2) then
+            brokenEdge(folder, TrackFrames.frame(layout.track, gap.from - 2), -1, railColor, timber)
+        end
+        if inside(gap.to + 2) then
+            brokenEdge(folder, TrackFrames.frame(layout.track, gap.to + 2), 1, railColor, timber)
+        end
     end
 end
 

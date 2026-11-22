@@ -57,6 +57,46 @@ KIT = {
     # The rift: a chasm whose trestle has lost a whole section. Needs pushing to clear.
     "Cavern_Rift": dict(kind="Cavern", length=224, turn=0.0, drop=20.0, palette=("Yellow", "Green"), seed=34,
                         size=(80, 75, 130), lake=False, side=1, gap=dict(start=96.0, end=132.0, drop=10.0)),
+
+    # --- more chunks for the DOORS-style roll (Config/Zones Kit.Chunks) -------------------------------------
+    # Optional per chunk: `bulge` (studs the tunnel swells out in its middle, a grotto) and `counts` (more or
+    # fewer of the dressings than the kind's default: clusters, giants, spikes, mites, worms, patches, rocks).
+    # Straights with their own character.
+    "Tunnel_Crystal": dict(kind="Tunnel", length=64, turn=0.0, drop=4.0, palette=("Blue", "Green"), seed=51,
+                           bulge=6.0, counts=dict(clusters=12, spikes=8)),
+    "Tunnel_Fungus": dict(kind="Tunnel", length=64, turn=0.0, drop=4.0, palette=("Yellow", "Red"), seed=52,
+                          bulge=4.0, counts=dict(patches=14, clusters=2)),
+    "Tunnel_Steep": dict(kind="Tunnel", length=64, turn=0.0, drop=10.0, palette=("Red", "Yellow"), seed=53,
+                         counts=dict(spikes=8)),
+    "Tunnel_Grotto": dict(kind="Tunnel", length=96, turn=0.0, drop=6.0, palette=COLORS, seed=54,
+                          bulge=10.0, counts=dict(clusters=8, worms=30, patches=6, rocks=8)),
+    # Bends: gentle, long, and hairpins (sharp: brake or lean hard).
+    "Tunnel_GentleL": dict(kind="Tunnel", length=64, turn=-math.radians(15), drop=4.0, palette=COLORS, seed=55),
+    "Tunnel_GentleR": dict(kind="Tunnel", length=64, turn=math.radians(15), drop=4.0, palette=COLORS, seed=56),
+    "Tunnel_LongBendL": dict(kind="Tunnel", length=96, turn=-math.radians(40), drop=6.0, palette=("Green", "Blue"),
+                             seed=57, bulge=3.0),
+    "Tunnel_LongBendR": dict(kind="Tunnel", length=96, turn=math.radians(40), drop=6.0, palette=("Yellow", "Red"),
+                             seed=58, bulge=3.0),
+    "Tunnel_HairpinL": dict(kind="Tunnel", length=48, turn=-math.radians(60), drop=2.0, sharp=True,
+                            palette=("Red", "Yellow"), seed=59),
+    "Tunnel_HairpinR": dict(kind="Tunnel", length=48, turn=math.radians(60), drop=2.0, sharp=True,
+                            palette=("Red", "Yellow"), seed=60),
+    # More broken track: a wider washout (needs a good clip), and a short chute with a big drop.
+    "Tunnel_WashoutWide": dict(kind="Tunnel", length=64, turn=0.0, drop=12.0, palette=("Blue", "Red"), seed=61,
+                               gap=dict(start=24.0, end=48.0, drop=8.0)),
+    "Tunnel_Chute": dict(kind="Tunnel", length=64, turn=0.0, drop=18.0, palette=("Green", "Yellow"), seed=62,
+                         gap=dict(start=28.0, end=44.0, drop=14.0)),
+    # Caverns.
+    "Cavern_Crystal": dict(kind="Cavern", length=224, turn=0.0, drop=10.0, palette=("Blue", "Red"), seed=63,
+                           size=(100, 85, 60), lake=False, side=1, counts=dict(giants=7, clusters=60)),
+    "Cavern_Pit": dict(kind="Cavern", length=224, turn=0.0, drop=10.0, palette=("Red", "Yellow"), seed=64,
+                       size=(60, 110, 150), lake=False, side=-1, counts=dict(spikes=40, worms=120)),
+    "Cavern_Pool": dict(kind="Cavern", length=224, turn=0.0, drop=10.0, palette=("Green", "Blue"), seed=65,
+                        size=(90, 65, 55), lake=True, side=-1),
+    "Cavern_Glow": dict(kind="Cavern", length=224, turn=0.0, drop=10.0, palette=("Yellow", "Green"), seed=66,
+                        size=(95, 60, 45), lake=False, side=1, counts=dict(patches=44, clusters=24)),
+    "Cavern_RiftWide": dict(kind="Cavern", length=224, turn=0.0, drop=24.0, palette=("Blue", "Red"), seed=67,
+                            size=(85, 80, 140), lake=False, side=-1, gap=dict(start=88.0, end=132.0, drop=14.0)),
 }
 
 PIT = 58.0  # how far a washout's pit drops below the cross-section center
@@ -267,6 +307,18 @@ def shape_for(name, spec):
             return dict(hw=HALF_W + 4 * pit(d), top=TOP, bottom=lerp(BOTTOM, PIT, pit(d)))
 
         return params, lambda d: (1.8 + 3.0 * pit(d)) * ends_taper(d), pit
+
+    bulge = spec.get("bulge", 0.0)
+    if bulge:
+        # A grotto: the tunnel swells out in its middle and closes back to the standard mouth at each end.
+        def swell(d):
+            return smoothstep((d - 6) / 20) * smoothstep((length - d - 6) / 20)
+
+        def params(d):
+            s = swell(d)
+            return dict(hw=HALF_W + bulge * s, top=TOP + bulge * 0.7 * s, bottom=BOTTOM + bulge * 0.2 * s)
+
+        return params, lambda d: (1.8 + 0.25 * bulge * swell(d)) * ends_taper(d), swell
 
     def params(d):
         return dict(hw=HALF_W, top=TOP, bottom=BOTTOM)
@@ -559,6 +611,7 @@ def dress(piece, points, info):
         "Tunnel": dict(clusters=3, giants=0, spikes=4, mites=0, worms=14, patches=3, rocks=4),
         "Cap": dict(clusters=2, giants=0, spikes=2, mites=0, worms=4, patches=1, rocks=6),
     }[kind]
+    counts = dict(counts, **spec.get("counts", {}))
 
     def pick(pool, avoid_margin=0.0, tries=40):
         if not pool:

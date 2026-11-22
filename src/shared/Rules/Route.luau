@@ -12,7 +12,7 @@ export type Stop = {
 
 export type Leg = {
     index: number,
-    rideLength: number,
+    segments: number, -- how many cave segments (one kit chunk each) the ride is
     ambushes: number,
     stop: Stop,
 }
@@ -21,7 +21,7 @@ export type Route = { zone: string, seed: number, legs: { Leg } }
 
 -- Fields read from Config/Zones and Config/Stages.
 type LegSpec = {
-    Ride: { Length: number, Ambushes: { number } },
+    Ride: { Segments: number, Ambushes: { number } },
     Stop: { Stage: string?, Fork: { string }?, Options: number? },
 }
 type ZoneSpec = { Id: string, Legs: { LegSpec } }
@@ -44,7 +44,7 @@ function Route.generate(zone: ZoneSpec, seed: number): Route
         end
         table.insert(legs, {
             index = index,
-            rideLength = spec.Ride.Length,
+            segments = spec.Ride.Segments,
             ambushes = Rng.int(rng, spec.Ride.Ambushes[1], spec.Ride.Ambushes[2]),
             stop = stop,
         })
@@ -68,7 +68,7 @@ function Route.validate(route: Route, stages: { [string]: StageSpec }): (boolean
     end
     for index, leg in route.legs do
         local where = "leg " .. index
-        if leg.rideLength <= 0 then
+        if leg.segments <= 0 then
             return false, where .. " has no ride"
         end
         if leg.ambushes < 0 then

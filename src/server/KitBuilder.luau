@@ -1,22 +1,29 @@
 --!strict
--- Builds the cave from the Blender kit (art/blender/build_cave_kit.py). Each placed piece is cloned from
--- ServerStorage.Content.Kit and pivoted onto its spot on the track; then the spores, mist and light-shaft
--- beams listed for it in Config/KitData are added. The kit's lights are made by each client
+-- Builds the cave from the Blender kit (art/blender/build_cave_kit.py), one chunk per segment, only around
+-- the cart (KitBuilder.stream). Each placed chunk is cloned from ServerStorage.Content.Kit and pivoted onto
+-- its spot on the track; then the spores, mist and light-shaft beams listed for it in Config/KitData, its
+-- rails and its number plate are added. The kit's lights are made by each client for the chunks that exist
 -- (client/CaveLights): lights the server made rendered nothing on clients (TRAPS #42).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
 
+local Placeholders = require(script.Parent.Placeholders)
+local TrackDresser = require(script.Parent.TrackDresser)
 local World = require(script.Parent.World)
 
 local Shared = ReplicatedStorage.Shared
 local Configs = require(Shared.Configs)
 local Layout = require(Shared.Rules.Layout)
+local RunInfo = require(Shared.RunInfo)
 local TrackFrames = require(Shared.TrackFrames)
 
 local KitBuilder = {}
 
-local PIECES_PER_FRAME = 3
+local AHEAD = 700 -- studs of cave built in front of the cart: ~12 s at a pushed run
+local BEHIND = 180 -- studs kept behind it
+local CHUNKS_PER_STEP = 2 -- most chunks built in one go, so building never hitches the server
+local STREAM_EVERY = 0.2
 
 local function vector(list: { number }): Vector3
     return Vector3.new(list[1], list[2], list[3])
@@ -144,12 +151,21 @@ end
 
 local warned = false
 
-local function piece(folder: Instance, placement: Layout.Placement, zone: any)
+-- Builds one placed chunk complete: its kit mesh, spores, mist and light shafts, its rails, any gap signs,
+-- and its segment number plate. The model's pivot is the chunk's frame and it carries the chunk's Piece,
+-- Index and Number as attributes, which is all a client needs to light it (client/CaveLights).
+function KitBuilder.chunk(layout: Layout.Layout, index: number, zone: any, folder: Instance): Model
+    local placement = layout.placements[index]
     local def = Configs.Kit.Pieces[placement.piece]
     local frame = KitBuilder.frame(placement)
     local palette = zone.Palette
     local model = Instance.new("Model")
-    model.Name = placement.piece
+    model.Name = if placement.number > 0
+        then string.format("%02d_%s", placement.number, placement.piece)
+        else placement.piece
+    model:SetAttribute("Piece", placement.piece)
+    model:SetAttribute("Index", index)
+    model:SetAttribute("Number", placement.number)
 
     local content = ServerStorage:FindFirstChild("Content")
     local kit = content and content:FindFirstChild("Kit")
@@ -186,20 +202,75 @@ local function piece(folder: Instance, placement: Layout.Placement, zone: any)
         )
     end
 
+    TrackDresser.dress(layout, placement, zone, model)
+    Placeholders.gapSigns(model, layout, placement.from, placement.to)
+    if placement.number > 0 then
+        Placeholders.plate(model, frame, placement.number)
+    end
+
+    model.WorldPivot = frame
     model.Parent = folder
+    return model
 end
 
--- Builds every piece of the run's cave. Yields while it works.
-function KitBuilder.build(layout: Layout.Layout, zone: any, parent: Instance)
+-- Keeps the cave built around the cart, the way DOORS builds rooms as you reach them: every chunk within
+-- AHEAD studs in front of `focus()` (the cart) and BEHIND studs behind it exists; the rest don't. It also
+-- shares which numbered segment the cart is on (RunInfo.Segment). The first fill (around `start`) happens
+-- before this returns, so the station is there for the crew to spawn into; after that it runs until the
+-- run's folder is cleared (World.reset).
+function KitBuilder.stream(layout: Layout.Layout, zone: any, parent: Instance, start: number, focus: () -> number)
     local folder = Instance.new("Folder")
     folder.Name = "Cave"
     folder.Parent = parent
-    for index, placement in layout.placements do
-        piece(folder, placement, zone)
-        if index % PIECES_PER_FRAME == 0 then
-            task.wait()
+    local built: { [number]: Model } = {}
+
+    -- Builds up to `limit` missing chunks around `at` (nearest first) and clears the ones out of range.
+    -- Returns how many it built.
+    local function update(at: number, limit: number): number
+        local low, high = at - BEHIND, at + AHEAD
+        for index, model in built do
+            local placement = layout.placements[index]
+            if placement.to < low or placement.from > high then
+                model:Destroy()
+                built[index] = nil
+            end
         end
+        local wanted = {}
+        for index = Layout.placementAt(layout, math.max(0, low)), #layout.placements do
+            local placement = layout.placements[index]
+            if placement.from > high then
+                break
+            end
+            if not built[index] and placement.to >= low then
+                table.insert(wanted, index)
+            end
+        end
+        table.sort(wanted, function(a, b)
+            local pa, pb = layout.placements[a], layout.placements[b]
+            return math.abs((pa.from + pa.to) / 2 - at) < math.abs((pb.from + pb.to) / 2 - at)
+        end)
+        local made = 0
+        for _, index in wanted do
+            if made >= limit then
+                break
+            end
+            built[index] = KitBuilder.chunk(layout, index, zone, folder)
+            made += 1
+        end
+        return made
     end
+
+    while update(start, CHUNKS_PER_STEP) > 0 do
+        task.wait()
+    end
+    task.spawn(function()
+        while folder.Parent do
+            local at = focus()
+            update(at, CHUNKS_PER_STEP)
+            RunInfo.set("Segment", Layout.numberAt(layout, at))
+            task.wait(STREAM_EVERY)
+        end
+    end)
 end
 
 return KitBuilder

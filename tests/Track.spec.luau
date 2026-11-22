@@ -19,7 +19,7 @@ local function trackOf(ids: { string })
 end
 
 local function leg(seed: number)
-    return trackOf(Kit.leg(Rng.new(seed), pieces, spec, 1300, 0, 0))
+    return trackOf(Kit.leg(Rng.new(seed), pieces, spec, 20, 0, 0))
 end
 
 local function copy(track)
