@@ -4,7 +4,9 @@
 -- gap (broken track the cart has to jump; Rules/Jump), just twisted rail ends and splintered sleepers at
 -- each edge. Through a three-way split (Rules/Split), three lanes fan out: the dead two end at buffer stops,
 -- and a signal board before the switch shows which lane is open (a green arrow) and which aren't (red
--- crosses). Everything else around the track (shoring, trestles, lanterns) comes with the kit pieces.
+-- crosses). The kit's rock doesn't collide, so an invisible floor runs along the track too (everywhere but
+-- over gaps), for anyone on foot. Everything else around the track (shoring, trestles, lanterns) comes with
+-- the kit pieces.
 -- Dressed one chunk at a time, as KitBuilder builds each segment ahead of the cart.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -243,6 +245,37 @@ local function lane(folder: Instance, track: Track.Track, split: Track.SplitSpan
     end
 end
 
+-- The invisible floor along one chunk, FLOOR_STEP studs at a time, sloping with the track, at the kit's
+-- floor height; thick so nobody passes through it landing hard (TRAPS #44).
+local FLOOR_STEP = 8
+local function floor(folder: Instance, layout: Layout.Layout, placement: Layout.Placement, width: number)
+    local track = layout.track
+    local d = placement.from
+    while d < placement.to - 1e-6 do
+        local length = math.min(FLOOR_STEP, placement.to - d)
+        local middle = d + length / 2
+        local overGap = false
+        for _, gap in track.gaps do
+            if d + length > gap.from and d < gap.to then
+                overGap = true
+            end
+        end
+        if not overGap then
+            local slab = World.part(
+                folder,
+                "Floor",
+                Vector3.new(width, 6, length + 0.5),
+                TrackFrames.frame(track, middle) * CFrame.new(0, trackConfig.FloorTop - 3, 0),
+                Color3.new(),
+                Enum.Material.SmoothPlastic
+            )
+            slab.Transparency = 1
+            slab.CanCollide = true
+        end
+        d += length
+    end
+end
+
 -- The index of the first track point at or after `distance`.
 local function pointAt(distances: { number }, distance: number): number
     local low, high = 1, #distances
@@ -350,8 +383,10 @@ function TrackDresser.dress(layout: Layout.Layout, placement: Layout.Placement, 
             brokenEdge(folder, TrackFrames.frame(layout.track, gap.to + 2), 1, colors)
         end
     end
+    local splitHere = false
     for _, split in splits do
         if inside(split.from) then
+            splitHere = true
             for which = -1, 1 do
                 lane(folder, layout.track, split, which, colors)
             end
@@ -359,6 +394,10 @@ function TrackDresser.dress(layout: Layout.Layout, placement: Layout.Placement, 
             signals(folder, TrackFrames.flat(layout.track, board), split, colors)
         end
     end
+
+    local widths = trackConfig.TrackFloor
+    local kind = Configs.Kit.Pieces[placement.piece].Kind
+    floor(folder, layout, placement, if splitHere then widths.Split else widths[kind] or widths.Tunnel)
 end
 
 return TrackDresser

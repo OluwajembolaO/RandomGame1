@@ -80,5 +80,11 @@ return {
             Station = { Width = 84, Offset = 10 },
             Stop = { Width = 100, Offset = 8 },
         },
+        -- The kit's rock doesn't collide (the cart rides its rails through it), so every chunk also gets an
+        -- invisible floor along the track at FloorTop, this wide: the tunnel floor, a walkway along a cavern's
+        -- trestle, all three lanes of a junction. Gaps stay open.
+        TrackFloor = { Tunnel = 26, Cavern = 14, Split = 40, Station = 26, Stop = 26, Cap = 26 },
+        -- Anyone who still ends up this far below the cart is put back beside it (server/Rescue).
+        RescueDrop = 35,
     },
 }

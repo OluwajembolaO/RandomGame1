@@ -47,6 +47,8 @@ Rules learned the hard way. Each one says what broke, the rule, and why. Add one
 
 46. **`rojo syncback` can't reach content made in a place opened from Roblox.** It reads a local `.rbxl`, and the Studio session is the cloud place. The Studio MCP can't write files either: its HTTP calls to localhost are blocked by the assistant's allowlist, and passing a serialized model back through the chat is far too big. So have the user right-click the instances and choose Save to File (a whole folder at once is fine). Then split the file into `assets/Content/...` with Lune (`@lune/roblox` deserializeModel / serializeModel). Processing a kit import is `art/studio/process_kit_import.luau`.
 
+47. **The cave kit's rock doesn't collide, so the floor has to come from somewhere else.** It's left non-colliding on purpose: the cart rides its rails through the meshes, and a hollow tube mesh can't collide accurately anyway (a convex hull fills it in). Anyone on foot who walked off the station, stop or crash floors fell through the rock and out of the world. Every chunk now gets an invisible floor along the track (`Run.Track.TrackFloor` widths, open over gaps). `server/Rescue` also puts anyone who ends up `RescueDrop` studs below the cart back behind it. Forgetting "Anchored" on import wasn't the cause: `process_kit_import.luau` anchors every part.
+
 ## World look
 
 15. **Size BillboardGuis in studs (`UDim2.fromScale`), not pixels.** Pixel-sized signs stay the same size up close and cover the HUD. In studs they shrink with distance like real signs.

@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CartService = require(script.Parent.CartService)
 local KitBuilder = require(script.Parent.KitBuilder)
 local Placeholders = require(script.Parent.Placeholders)
+local Rescue = require(script.Parent.Rescue)
 local Survivors = require(script.Parent.Survivors)
 local Weapons = require(script.Parent.Weapons)
 local World = require(script.Parent.World)
@@ -188,6 +189,10 @@ end
 
 function Director.start()
     CartService.setCrewSource(Survivors.crew)
+    -- Anyone who falls out of the cave is put back on the track just behind the cart.
+    Rescue.start(function(): CFrame?
+        return if CartService.model() then CartService.frame() * CFrame.new(0, 3, 9) else nil
+    end)
     Weapons.setIgnore(function(): { Instance }
         local cart = CartService.model()
         return if cart then { cart } else {}
