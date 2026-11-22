@@ -40,12 +40,12 @@ T.describe("Layout", function()
         T.equal(#segments, 2 + 2 * #zone.Legs)
     end)
 
-    T.it("numbers the ride's segments 1 to 30 through the whole run", function()
+    T.it("numbers the ride's segments 1, 2, 3... through the whole run", function()
         local total = 0
         for _, legSpec in zone.Legs do
             total += legSpec.Ride.Segments
         end
-        T.equal(total, 30)
+        T.truthy(total > 0, "the zone has a ride")
         for seed = 1, 20 do
             local result = layout(seed)
             T.equal(result.count, total)

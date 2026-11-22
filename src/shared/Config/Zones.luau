@@ -107,14 +107,14 @@ return {
             MaxHeading = 1.4,
         },
         Mobs = { "Crawler", "Bat" },
-        -- 30 segments in all: a stop after every 10.
+        -- 60 segments in all: a stop after every 20 (about 40-45 seconds of riding between stops).
         Legs = {
-            { Ride = { Segments = 10, Ambushes = { 2, 3 } }, Stop = { Stage = "Obby" } },
+            { Ride = { Segments = 20, Ambushes = { 2, 3 } }, Stop = { Stage = "Obby" } },
             {
-                Ride = { Segments = 10, Ambushes = { 3, 4 } },
+                Ride = { Segments = 20, Ambushes = { 3, 4 } },
                 Stop = { Fork = { "SignalRoom", "SupplyDepot" }, Options = 2 },
             },
-            { Ride = { Segments = 10, Ambushes = { 4, 5 } }, Stop = { Stage = "ForemanBoss" } },
+            { Ride = { Segments = 20, Ambushes = { 4, 5 } }, Stop = { Stage = "ForemanBoss" } },
         },
     },
     { Id = "CrystalHollows", Name = "Crystal Hollows", Built = false },
