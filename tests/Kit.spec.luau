@@ -127,6 +127,70 @@ T.describe("Kit", function()
         T.equal(Kit.trackPiece(pieces.Tunnel_Straight).gap, nil)
     end)
 
+    T.it("rolls every difficulty's legs rideable, with the tags each must have", function()
+        for name, difficulty in spec.Difficulty do
+            for seed = 1, 300 do
+                local sequence = Kit.leg(Rng.new(seed), pieces, spec, 20, 0, 0, name)
+                local ok, problem = Kit.check(sequence, pieces, spec, 0, 0, name)
+                T.truthy(ok, name .. " seed " .. seed .. ": " .. tostring(problem))
+                for _, tag in difficulty.EveryLeg or spec.EveryLeg do
+                    T.truthy(count(sequence, tag) >= 1, name .. " seed " .. seed .. " has no " .. tag)
+                end
+            end
+        end
+    end)
+
+    T.it("gets harder from easy to hard", function()
+        local function tierShare(name: string, tier: number): number
+            local hits, total = 0, 0
+            for seed = 1, 200 do
+                for _, id in Kit.leg(Rng.new(seed), pieces, spec, 20, 0, 0, name) do
+                    local chunk = Kit.chunk(spec, id)
+                    if chunk and (chunk.Tier or 1) == tier then
+                        hits += 1
+                    end
+                    total += 1
+                end
+            end
+            return hits / total
+        end
+        T.equal(tierShare("Easy", 3), 0, "no hard chunks on an easy leg")
+        T.truthy(tierShare("Hard", 3) > tierShare("Medium", 3), "more hard chunks on hard legs")
+        T.truthy(tierShare("Easy", 1) > tierShare("Hard", 1), "more easy chunks on easy legs")
+        local function splits(name: string): number
+            local n = 0
+            for seed = 1, 200 do
+                n += count(Kit.leg(Rng.new(seed), pieces, spec, 20, 0, 0, name), "Split")
+            end
+            return n
+        end
+        T.truthy(splits("Hard") >= splits("Medium"), "splits come at least as often on hard legs")
+    end)
+
+    T.it("keeps a bend from coming straight after a steep drop, and splits out of the ends", function()
+        for seed = 1, 200 do
+            local sequence = Kit.leg(Rng.new(seed), pieces, spec, 20, 0, 0, "Hard")
+            for index, id in sequence do
+                if tagOf(id) == "Steep" and sequence[index + 1] then
+                    local nextTag = tagOf(sequence[index + 1])
+                    T.truthy(nextTag ~= "Bend" and nextTag ~= "Sharp", "seed " .. seed .. " bend after a drop")
+                end
+                if tagOf(id) == "Split" then
+                    T.truthy(index > spec.EdgeTunnels and index <= 20 - spec.EdgeTunnels, "seed " .. seed)
+                end
+            end
+        end
+    end)
+
+    T.it("catches a chunk that doesn't belong at a difficulty", function()
+        local S, sharp = spec.Straight, "Tunnel_SharpR"
+        local easy = { S, S, sharp, S, "Cavern_Lake", S, S, S, S, S }
+        T.truthy((Kit.check(easy, pieces, spec, 0, 0, "Easy")), "a fine easy leg")
+        local hairpin = { S, S, "Tunnel_HairpinR", S, "Cavern_Lake", S, S, S, S, S }
+        T.falsy((Kit.check(hairpin, pieces, spec, 0, 0, "Easy")), "hairpins are too hard for an easy leg")
+        T.falsy((Kit.check(easy, pieces, spec, 0, 0, "Medium")), "a medium leg needs a split")
+    end)
+
     T.it("catches broken legs", function()
         local S, sharp, bend = spec.Straight, "Tunnel_SharpR", "Tunnel_BendR"
         local function bad(sequence, why)

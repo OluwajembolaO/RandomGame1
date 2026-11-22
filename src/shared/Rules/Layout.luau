@@ -15,7 +15,7 @@ export type Segment = { kind: string, leg: number, from: number, to: number }
 
 -- Where one kit piece goes: its track starts at `position` heading `heading`, `from` studs along the route.
 -- number is its segment number on the ride (0 for the station, stop chambers and end cap); leg is the ride
--- leg it's on (0 likewise).
+-- leg it's on (0 likewise); open is a junction's open lane (-1, 0 or 1; Rules/Split).
 export type Placement = {
     piece: string,
     from: number,
@@ -24,6 +24,7 @@ export type Placement = {
     heading: number,
     number: number,
     leg: number,
+    open: number?,
 }
 
 export type Layout = {
@@ -69,7 +70,8 @@ function Layout.build(route: Route.Route, kitSpec: Kit.Spec, pieces: Kit.Pieces,
     local count = 0
 
     local function place(id: string, number: number, leg: number): (number, number)
-        local track = Track.build({ Kit.trackPiece(pieces[id]) }, start, heading, spec.Step)
+        local open = if pieces[id].Split then Rng.int(rng, -1, 1) else nil
+        local track = Track.build({ Kit.trackPiece(pieces[id], open) }, start, heading, spec.Step)
         local from = offset
         table.insert(tracks, track)
         table.insert(placements, {
@@ -80,6 +82,7 @@ function Layout.build(route: Route.Route, kitSpec: Kit.Spec, pieces: Kit.Pieces,
             heading = heading,
             number = number,
             leg = leg,
+            open = open,
         })
         offset += track.length
         start = track.points[#track.points]
@@ -91,7 +94,7 @@ function Layout.build(route: Route.Route, kitSpec: Kit.Spec, pieces: Kit.Pieces,
     table.insert(segments, { kind = "Station", leg = 0, from = stationFrom, to = stationTo })
     for _, leg in route.legs do
         local legFrom = offset
-        for _, id in Kit.leg(rng, pieces, kitSpec, leg.segments, heading, spec.Heading) do
+        for _, id in Kit.leg(rng, pieces, kitSpec, leg.segments, heading, spec.Heading, leg.difficulty) do
             count += 1
             place(id, count, leg.index)
         end

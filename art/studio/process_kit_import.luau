@@ -41,6 +41,13 @@ local ORDER = {
     "Cavern_Pool",
     "Cavern_Glow",
     "Cavern_RiftWide",
+    "Tunnel_Junction",
+    "Tunnel_JunctionTight",
+    "Tunnel_HairpinSteepL",
+    "Tunnel_HairpinSteepR",
+    "Tunnel_WashoutHuge",
+    "Tunnel_Plunge",
+    "Cavern_Abyss",
 }
 local SPACING = 700
 

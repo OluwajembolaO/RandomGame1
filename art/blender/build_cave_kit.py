@@ -97,6 +97,30 @@ KIT = {
                         size=(95, 60, 45), lake=False, side=1, counts=dict(patches=44, clusters=24)),
     "Cavern_RiftWide": dict(kind="Cavern", length=224, turn=0.0, drop=24.0, palette=("Blue", "Red"), seed=67,
                             size=(85, 80, 140), lake=False, side=-1, gap=dict(start=88.0, end=132.0, drop=14.0)),
+
+    # --- three-way splits, and harder chunks for the end of a run ------------------------------------------
+    # A split: a wide junction hall where the track fans into three lanes `offset` studs apart from `start`
+    # (horizontal studs in). Each run the game opens one lane (Rules/Split) and lays the lanes, the buffer
+    # stops ending the two dead lanes at `buffer`, and the signals itself; the open lane rejoins the line by
+    # `end`. The hall only has to leave them room.
+    "Tunnel_Junction": dict(kind="Tunnel", length=128, turn=0.0, drop=6.0, palette=COLORS, seed=71, bulge=16.0,
+                            split=dict(start=32.0, end=124.0, buffer=96.0, offset=9.0, ramp=28.0)),
+    "Tunnel_JunctionTight": dict(kind="Tunnel", length=96, turn=0.0, drop=4.0, palette=("Red", "Blue"), seed=72,
+                                 bulge=14.0, split=dict(start=20.0, end=92.0, buffer=64.0, offset=8.0, ramp=20.0)),
+    # Hairpins on a steep drop: they come in fast. Brake hard.
+    "Tunnel_HairpinSteepL": dict(kind="Tunnel", length=48, turn=-math.radians(60), drop=8.0, sharp=True,
+                                 palette=("Red", "Yellow"), seed=73, counts=dict(spikes=8)),
+    "Tunnel_HairpinSteepR": dict(kind="Tunnel", length=48, turn=math.radians(60), drop=8.0, sharp=True,
+                                 palette=("Red", "Yellow"), seed=74, counts=dict(spikes=8)),
+    # A washout too wide to clear at cruise: push.
+    "Tunnel_WashoutHuge": dict(kind="Tunnel", length=64, turn=0.0, drop=12.0, palette=("Red", "Yellow"), seed=75,
+                               gap=dict(start=20.0, end=52.0, drop=8.0)),
+    # A plunge: the floor falls away and the cart picks up a frightening speed.
+    "Tunnel_Plunge": dict(kind="Tunnel", length=64, turn=0.0, drop=16.0, palette=("Blue", "Red"), seed=76,
+                          counts=dict(spikes=10, worms=24)),
+    # The abyss: the widest, deepest jump.
+    "Cavern_Abyss": dict(kind="Cavern", length=224, turn=0.0, drop=34.0, palette=("Red", "Blue"), seed=77,
+                         size=(90, 90, 160), lake=False, side=1, gap=dict(start=88.0, end=140.0, drop=24.0)),
 }
 
 PIT = 58.0  # how far a washout's pit drops below the cross-section center
@@ -396,9 +420,10 @@ class Piece:
 
 
 def corridor(piece, vert, d, a, margin=0.0):
-    """True when a point is in the space the cart and riders pass through."""
+    """True when a point is in the space the cart and riders pass through (all three lanes of a split)."""
     above = vert.co.z - piece.track_z(d)
-    return abs(a - 0) < 13 + margin and -6 < above < 22 + margin
+    lanes = piece.spec.get("split", {}).get("offset", 0.0)
+    return abs(a - 0) < 13 + lanes + margin and -6 < above < 22 + margin
 
 
 def crystal_cluster(piece, base, normal, size, color):
@@ -703,12 +728,24 @@ def dress(piece, points, info):
     # Mine shoring every 32 studs through tunnels (a washout's stands clear of its pit).
     if kind == "Tunnel":
         gap = spec.get("gap")
-        marks = [12, 56] if gap else range(16, int(spec["length"]), 32)
+        split = spec.get("split")
+        if split:
+            marks = [6, int(spec["length"]) - 6]  # only at the mouths: the hall is left clear for the lanes
+        elif gap:
+            marks = [12, 56]
+        else:
+            marks = range(16, int(spec["length"]), 32)
         for d_mark in marks:
             position, heading, d = points[round(d_mark / STEP)]
             shoring(piece, position, heading)
         if gap:
             washout(piece, points, gap)
+        if split:
+            # Lanterns hung along both walls of the junction hall.
+            for d_mark in range(20, int(spec["length"]) - 12, 24):
+                position, heading, d = points[round(d_mark / STEP)]
+                for side in (-1, 1):
+                    lantern(piece, position + right_of(heading) * side * (split["offset"] + 15) + UP * 14, 40)
 
     if big:
         trestle(piece, [by_ring[k] for k in ring_keys], points, None)
@@ -830,6 +867,11 @@ def write_kit_data(pieces, path_out):
         if gap:
             lines.append("            Gap = { From = %s, To = %s, Drop = %s }," % (
                 lua_number(gap["start"]), lua_number(gap["end"]), lua_number(gap["drop"])))
+        split = spec.get("split")
+        if split:
+            lines.append("            Split = { From = %s, To = %s, Buffer = %s, Offset = %s, Ramp = %s }," % (
+                lua_number(split["start"]), lua_number(split["end"]), lua_number(split["buffer"]),
+                lua_number(split["offset"]), lua_number(split["ramp"])))
         lines.append("            Palette = { %s }," % ", ".join('"%s"' % c for c in spec["palette"]))
         lines.append("            Lake = %s," % (lua_number(piece.lake) if piece.lake is not None else "nil"))
         lines.append("            Lights = {")

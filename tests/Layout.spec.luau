@@ -63,6 +63,34 @@ T.describe("Layout", function()
         end
     end)
 
+    T.it("opens one lane of every junction, and the same one for the same seed", function()
+        local opened = { [-1] = 0, [0] = 0, [1] = 0 }
+        for seed = 1, 60 do
+            local result = layout(seed)
+            local junctions = 0
+            for _, placement in result.placements do
+                if pieces[placement.piece].Split then
+                    junctions += 1
+                    T.truthy(placement.open == -1 or placement.open == 0 or placement.open == 1, "seed " .. seed)
+                    opened[placement.open :: number] += 1
+                else
+                    T.equal(placement.open, nil)
+                end
+            end
+            T.equal(#result.track.splits, junctions, "seed " .. seed .. " a split span per junction")
+            for index, split in result.track.splits do
+                T.truthy(split.from < split.buffer and split.buffer < split.to, "seed " .. seed .. " split " .. index)
+            end
+            local again = layout(seed)
+            for index, split in result.track.splits do
+                T.equal(again.track.splits[index].open, split.open)
+            end
+        end
+        for lane, times in opened do
+            T.truthy(times > 0, "lane " .. lane .. " is never the open one")
+        end
+    end)
+
     T.it("finds the segment under any distance", function()
         local result = layout(7)
         T.equal(Layout.numberAt(result, result.parked), 0, "none yet at the station")

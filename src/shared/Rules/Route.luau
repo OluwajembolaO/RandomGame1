@@ -13,6 +13,7 @@ export type Stop = {
 export type Leg = {
     index: number,
     segments: number, -- how many cave segments (one kit chunk each) the ride is
+    difficulty: string, -- Easy, Medium or Hard (Config/Zones Kit.Difficulty)
     ambushes: number,
     stop: Stop,
 }
@@ -21,7 +22,7 @@ export type Route = { zone: string, seed: number, legs: { Leg } }
 
 -- Fields read from Config/Zones and Config/Stages.
 type LegSpec = {
-    Ride: { Segments: number, Ambushes: { number } },
+    Ride: { Segments: number, Difficulty: string?, Ambushes: { number } },
     Stop: { Stage: string?, Fork: { string }?, Options: number? },
 }
 type ZoneSpec = { Id: string, Legs: { LegSpec } }
@@ -45,6 +46,7 @@ function Route.generate(zone: ZoneSpec, seed: number): Route
         table.insert(legs, {
             index = index,
             segments = spec.Ride.Segments,
+            difficulty = spec.Ride.Difficulty or "Medium",
             ambushes = Rng.int(rng, spec.Ride.Ambushes[1], spec.Ride.Ambushes[2]),
             stop = stop,
         })

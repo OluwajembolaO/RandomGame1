@@ -30,6 +30,10 @@ local function leanText(side: number): string
     return if side > 0 then "LEAN RIGHT ▶ [E]" elseif side < 0 then "[Q] ◀ LEAN LEFT" else "LEAN INTO IT"
 end
 
+-- The lane the crew's lean takes at a three-way split (Rules/Split).
+local LANES = { [-1] = "◀ LEFT", [0] = "▲ MIDDLE", [1] = "RIGHT ▶" }
+local SPLIT_WARN = 220 -- studs before a split's switch that the HUD calls it
+
 local PHASE_TITLES = {
     Station = "THE STATION",
     Victory = "YOU MADE IT",
@@ -80,7 +84,7 @@ local function Sign(props: { title: string, tag: string? })
         }),
         Tag = if props.tag
             then Rustic.brass({
-                size = UDim2.fromScale(0.46, 0.46),
+                size = UDim2.fromScale(0.7, 0.46),
                 position = UDim2.new(0.5, 0, 1, 4),
                 anchor = Vector2.new(0.5, 0),
                 rotation = -1.5,
@@ -119,6 +123,9 @@ local function Hud()
     local sharpSide = useAttribute(info, "SharpSide", 0)
     local gapIn = useAttribute(info, "GapIn", -1)
     local gapNeed = useAttribute(info, "GapNeed", 0)
+    local splitIn = useAttribute(info, "SplitIn", -1)
+    local splitPick = useAttribute(info, "SplitPick", 0)
+    local difficulty = useAttribute(info, "Difficulty", "")
     local speed = useAttribute(info, "Speed", 0)
     local ammo = useAttribute(me, "Ammo", 0)
     local reloading = useAttribute(me, "Reloading", false)
@@ -133,13 +140,14 @@ local function Hud()
         tag = string.upper(genre)
     elseif segments > 0 and phase ~= "Station" then
         tag = string.format("SEGMENT %02d / %02d", segment, segments)
+            .. (if difficulty ~= "" then "  ·  " .. string.upper(difficulty) else "")
     end
     local note = message
     if countdown > 0 then
         note = (if message ~= "" then message .. "   " else "") .. countdown
     end
 
-    -- The one warning that matters most right now: off the rails, tipping, a gap, then a sharp bend.
+    -- The one warning that matters most right now: off the rails, tipping, a split, a gap, then a sharp bend.
     local warning: string? = nil
     local warningColor = C.Danger
     local hint: string? = nil
@@ -148,6 +156,10 @@ local function Hud()
         hint = "HOLD [E] ON THE CART TO PUSH IT BACK ON — MORE HANDS, FASTER"
     elseif riding and tilt > 0.15 then
         warning = "TIPPING!  " .. leanText(leanSide)
+    elseif riding and splitIn >= 0 and splitIn <= SPLIT_WARN then
+        warning = "THREE-WAY SPLIT — TAKING " .. LANES[splitPick]
+        warningColor = C.Lamp
+        hint = "[Q] LEAN LEFT  ·  HOLD STEADY  ·  [E] LEAN RIGHT — TAKE THE GREEN LINE"
     elseif riding and gapIn >= 0 and gapIn <= Configs.Run.Cart.Jump.WarnDistance then
         local fastEnough = speed >= gapNeed
         warning = "GAP AHEAD — NEED " .. gapNeed .. "  ·  YOU " .. speed

@@ -6,20 +6,36 @@
 -- A piece can have a gap: broken track from `from` to `to` (horizontal studs into the piece) whose far side
 -- sits `drop` studs lower. Heights follow one profile (Track.heightAt), which art/blender/build_cave_kit.py's
 -- path() copies exactly. The cart has to jump the gap (Rules/Jump).
+--
+-- A straight piece can also be a three-way split (Rules/Split): lanes fan out from `from`, the two dead ones
+-- end at `buffer`, the open one (`open`: -1, 0 or 1) rejoins the line by `to`. The line itself runs straight
+-- through; the lanes are offsets from it.
 
 export type Vec = { x: number, y: number, z: number }
 export type GapDef = { from: number, to: number, drop: number }
+export type SplitDef = { from: number, to: number, buffer: number, offset: number, ramp: number, open: number }
 -- kind is "Straight" or "Curve" (string literal unions widen across modules; TRAPS #19).
-export type Piece = { kind: string, length: number, turn: number, grade: number, sharp: boolean, gap: GapDef? }
+export type Piece = {
+    kind: string,
+    length: number,
+    turn: number,
+    grade: number,
+    sharp: boolean,
+    gap: GapDef?,
+    split: SplitDef?,
+}
 export type Span = { from: number, to: number }
 -- A gap along the whole track: from/to are track distances, length is horizontal, grade is the approach's.
 export type Gap = { from: number, to: number, length: number, drop: number, grade: number }
+-- A split along the whole track: from, to and buffer are track distances (Rules/Split.Span).
+export type SplitSpan = { from: number, to: number, buffer: number, offset: number, ramp: number, open: number }
 export type Track = {
     points: { Vec },
     distances: { number },
     length: number,
     sharp: { Span },
     gaps: { Gap },
+    splits: { SplitSpan },
     startHeading: number,
     endHeading: number,
 }
@@ -44,9 +60,12 @@ function Track.build(pieces: { Piece }, start: Vec, heading: number, step: numbe
     local distances = { 0 }
     local sharp: { Span } = {}
     local gaps: { Gap } = {}
+    local splits: { SplitSpan } = {}
     local x, y, z, h = start.x, start.y, start.z, heading
     local travelled = 0
     for _, piece in pieces do
+        local split = piece.split
+        local marks: { [string]: number } = {} -- the split's from, buffer and to as track distances
         local count = math.max(1, math.ceil(piece.length / step))
         local ds = piece.length / count
         local dh = piece.turn / count
@@ -76,6 +95,13 @@ function Track.build(pieces: { Piece }, start: Vec, heading: number, step: numbe
             if gap and not gapTo and k * ds >= gap.to - 1e-6 then
                 gapTo = travelled
             end
+            if split then
+                for _, key in { "from", "buffer", "to" } do
+                    if not marks[key] and k * ds >= (split :: any)[key] - 1e-6 then
+                        marks[key] = travelled
+                    end
+                end
+            end
         end
         if piece.sharp then
             table.insert(sharp, { from = from, to = travelled })
@@ -85,6 +111,16 @@ function Track.build(pieces: { Piece }, start: Vec, heading: number, step: numbe
                 { from = gapFrom, to = gapTo, length = gap.to - gap.from, drop = gap.drop, grade = piece.grade }
             table.insert(gaps, span)
         end
+        if split and marks.from and marks.buffer and marks.to then
+            table.insert(splits, {
+                from = marks.from,
+                to = marks.to,
+                buffer = marks.buffer,
+                offset = split.offset,
+                ramp = split.ramp,
+                open = split.open,
+            })
+        end
     end
     return {
         points = points,
@@ -92,6 +128,7 @@ function Track.build(pieces: { Piece }, start: Vec, heading: number, step: numbe
         length = travelled,
         sharp = sharp,
         gaps = gaps,
+        splits = splits,
         startHeading = heading,
         endHeading = h,
     }
@@ -110,6 +147,7 @@ function Track.concat(tracks: { Track }): Track
     local distances: { number } = {}
     local sharp: { Span } = {}
     local gaps: { Gap } = {}
+    local splits: { SplitSpan } = {}
     local offset = 0
     for index, track in tracks do
         for i = if index == 1 then 1 else 2, #track.points do
@@ -128,6 +166,16 @@ function Track.concat(tracks: { Track }): Track
                 grade = gap.grade,
             })
         end
+        for _, split in track.splits do
+            table.insert(splits, {
+                from = split.from + offset,
+                to = split.to + offset,
+                buffer = split.buffer + offset,
+                offset = split.offset,
+                ramp = split.ramp,
+                open = split.open,
+            })
+        end
         offset += track.length
     end
     return {
@@ -136,6 +184,7 @@ function Track.concat(tracks: { Track }): Track
         length = offset,
         sharp = sharp,
         gaps = gaps,
+        splits = splits,
         startHeading = tracks[1].startHeading,
         endHeading = tracks[#tracks].endHeading,
     }
@@ -196,6 +245,16 @@ function Track.nextGap(track: Track, distance: number): Gap?
     for _, gap in track.gaps do
         if gap.to > distance then
             return gap
+        end
+    end
+    return nil
+end
+
+-- The split the cart is in or coming up to (the first that hasn't ended yet), or nil.
+function Track.nextSplit(track: Track, distance: number): SplitSpan?
+    for _, split in track.splits do
+        if split.to > distance then
+            return split
         end
     end
     return nil

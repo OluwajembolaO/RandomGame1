@@ -203,7 +203,7 @@ function KitBuilder.chunk(layout: Layout.Layout, index: number, zone: any, folde
     end
 
     TrackDresser.dress(layout, placement, zone, model)
-    Placeholders.gapSigns(model, layout, placement.from, placement.to)
+    Placeholders.warningSigns(model, layout, placement.from, placement.to)
     if placement.number > 0 then
         Placeholders.plate(model, frame, placement.number)
     end

@@ -22,7 +22,11 @@ local C = Theme.Color
 local info = RunInfo.instance()
 
 type Stop = { at: number, name: string }
-type Plan = { start: number, finish: number, ticks: { number }, stops: { Stop } }
+-- A stretch between stops, labeled with its difficulty halfway along.
+type Stretch = { at: number, difficulty: string }
+type Plan = { start: number, finish: number, ticks: { number }, stops: { Stop }, stretches: { Stretch } }
+
+local DIFFICULTY_COLOR = { Easy = Theme.Color.Safe, Medium = Theme.Color.Brass, Hard = Theme.Color.Danger }
 
 local function plan(seed: number): Plan?
     if seed == 0 then
@@ -38,12 +42,22 @@ local function plan(seed: number): Plan?
         end
     end
     local stops: { Stop } = {}
+    local stretches: { Stretch } = {}
+    local previous = layout.parked
     for index, leg in route.legs do
         local stage = leg.stop.stage
         local name = if stage then Configs.Stages[stage].Name else "Fork in the line"
         table.insert(stops, { at = layout.stops[index], name = name })
+        table.insert(stretches, { at = (previous + layout.stops[index]) / 2, difficulty = leg.difficulty })
+        previous = layout.stops[index]
     end
-    return { start = layout.parked, finish = stops[#stops].at, ticks = ticks, stops = stops }
+    return {
+        start = layout.parked,
+        finish = stops[#stops].at,
+        ticks = ticks,
+        stops = stops,
+        stretches = stretches,
+    }
 end
 
 local POST_X = 0.62 -- where the post stands across the meter's width
@@ -113,6 +127,20 @@ local function DepthMeter(): any
                 maxSize = 13,
                 zindex = 5,
             }),
+        })
+    end
+
+    for index, stretch in route.stretches do
+        children["Stretch" .. index] = Rustic.text({
+            text = string.upper(stretch.difficulty),
+            font = Theme.Font.Stamp,
+            color = DIFFICULTY_COLOR[stretch.difficulty] or C.Paper,
+            size = UDim2.fromOffset(70, 16),
+            position = UDim2.new(POST_X, -16, depth(stretch.at), 0),
+            anchor = Vector2.new(1, 0.5),
+            align = Enum.TextXAlignment.Right,
+            maxSize = 12,
+            stroke = 1.5,
         })
     end
 

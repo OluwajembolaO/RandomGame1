@@ -2,6 +2,10 @@
 -- Only zone 1 is built for the prototype; the rest are the roadmap.
 -- Not --!strict: built and unbuilt zones have different fields (TRAPS #21). Tests check the data.
 
+-- Straight chunks a jump can take its run-up from.
+local RUN_UPS =
+    { "Tunnel_Straight", "Tunnel_Crystal", "Tunnel_Fungus", "Tunnel_Grotto", "Tunnel_Steep", "Tunnel_Plunge" }
+
 return {
     {
         Id = "OldMine",
@@ -38,83 +42,96 @@ return {
             ShaftOpacity = 0.35, -- 1 = the original strength of the light-shaft beams
         },
         -- The cave, snapped together from the Blender kit's chunks (Config/KitData) one segment at a time,
-        -- like DOORS rooms (Rules/Kit): each segment is drawn by Weight from the chunks that fit there.
+        -- like DOORS rooms (Rules/Kit): each segment is drawn by Weight from the chunks that fit there. Tier
+        -- is how hard a chunk is (1 easy, 2 medium, 3 hard); each leg's Difficulty scales the weights by tier.
         Kit = {
             Station = "Station",
             Stop = "StopChamber",
             Cap = "EndCap",
             Straight = "Tunnel_Straight", -- run-ups, and the fallback when nothing else fits
             Chunks = {
-                -- Straights: plain, crystal-studded, fungus-choked, a steep fast drop, a wide grotto.
-                { Id = "Tunnel_Straight", Weight = 14 },
-                { Id = "Tunnel_Crystal", Weight = 6 },
-                { Id = "Tunnel_Fungus", Weight = 6 },
-                { Id = "Tunnel_Steep", Weight = 4 },
-                { Id = "Tunnel_Grotto", Weight = 5 },
+                -- Straights: plain, crystal-studded, fungus-choked, a wide grotto; a steep drop and a plunge.
+                { Id = "Tunnel_Straight", Weight = 14, Tier = 1 },
+                { Id = "Tunnel_Crystal", Weight = 6, Tier = 1 },
+                { Id = "Tunnel_Fungus", Weight = 6, Tier = 1 },
+                { Id = "Tunnel_Grotto", Weight = 5, Tier = 1 },
+                { Id = "Tunnel_Steep", Weight = 4, Tier = 2, Tag = "Steep" },
+                { Id = "Tunnel_Plunge", Weight = 4, Tier = 3, Tag = "Steep" },
                 -- Bends: normal, gentle and long sweeping ones.
-                { Id = "Tunnel_BendL", Weight = 10, Tag = "Bend" },
-                { Id = "Tunnel_BendR", Weight = 10, Tag = "Bend" },
-                { Id = "Tunnel_GentleL", Weight = 7, Tag = "Bend" },
-                { Id = "Tunnel_GentleR", Weight = 7, Tag = "Bend" },
-                { Id = "Tunnel_LongBendL", Weight = 6, Tag = "Bend" },
-                { Id = "Tunnel_LongBendR", Weight = 6, Tag = "Bend" },
+                { Id = "Tunnel_BendL", Weight = 10, Tier = 1, Tag = "Bend" },
+                { Id = "Tunnel_BendR", Weight = 10, Tier = 1, Tag = "Bend" },
+                { Id = "Tunnel_GentleL", Weight = 7, Tier = 1, Tag = "Bend" },
+                { Id = "Tunnel_GentleR", Weight = 7, Tier = 1, Tag = "Bend" },
+                { Id = "Tunnel_LongBendL", Weight = 6, Tier = 1, Tag = "Bend" },
+                { Id = "Tunnel_LongBendR", Weight = 6, Tier = 1, Tag = "Bend" },
                 -- Sharp bends and hairpins: brake, or lean hard.
-                { Id = "Tunnel_SharpL", Weight = 6, Tag = "Sharp" },
-                { Id = "Tunnel_SharpR", Weight = 6, Tag = "Sharp" },
-                { Id = "Tunnel_HairpinL", Weight = 3, Tag = "Sharp" },
-                { Id = "Tunnel_HairpinR", Weight = 3, Tag = "Sharp" },
+                { Id = "Tunnel_SharpL", Weight = 6, Tier = 2, Tag = "Sharp" },
+                { Id = "Tunnel_SharpR", Weight = 6, Tier = 2, Tag = "Sharp" },
+                { Id = "Tunnel_HairpinL", Weight = 3, Tier = 3, Tag = "Sharp" },
+                { Id = "Tunnel_HairpinR", Weight = 3, Tier = 3, Tag = "Sharp" },
+                { Id = "Tunnel_HairpinSteepL", Weight = 3, Tier = 3, Tag = "Sharp" },
+                { Id = "Tunnel_HairpinSteepR", Weight = 3, Tier = 3, Tag = "Sharp" },
                 -- Broken track to jump (Rules/Jump), always straight after a straight run-up.
-                {
-                    Id = "Tunnel_Washout",
-                    Weight = 5,
-                    Tag = "Gap",
-                    After = { "Tunnel_Straight", "Tunnel_Crystal", "Tunnel_Fungus", "Tunnel_Steep", "Tunnel_Grotto" },
-                },
-                {
-                    Id = "Tunnel_WashoutWide",
-                    Weight = 3,
-                    Tag = "Gap",
-                    After = { "Tunnel_Straight", "Tunnel_Crystal", "Tunnel_Fungus", "Tunnel_Steep", "Tunnel_Grotto" },
-                },
-                {
-                    Id = "Tunnel_Chute",
-                    Weight = 3,
-                    Tag = "Gap",
-                    After = { "Tunnel_Straight", "Tunnel_Crystal", "Tunnel_Fungus", "Tunnel_Steep", "Tunnel_Grotto" },
-                },
-                -- Caverns (the rifts are broken trestles to jump).
-                { Id = "Cavern_Lake", Weight = 4, Tag = "Cavern" },
-                { Id = "Cavern_Chasm", Weight = 4, Tag = "Cavern" },
-                { Id = "Cavern_Garden", Weight = 4, Tag = "Cavern" },
-                { Id = "Cavern_Crystal", Weight = 4, Tag = "Cavern" },
-                { Id = "Cavern_Pit", Weight = 4, Tag = "Cavern" },
-                { Id = "Cavern_Pool", Weight = 4, Tag = "Cavern" },
-                { Id = "Cavern_Glow", Weight = 4, Tag = "Cavern" },
-                { Id = "Cavern_Rift", Weight = 4, Tag = "Cavern" },
-                { Id = "Cavern_RiftWide", Weight = 3, Tag = "Cavern" },
+                { Id = "Tunnel_Washout", Weight = 5, Tier = 1, Tag = "Gap", After = RUN_UPS },
+                { Id = "Tunnel_Chute", Weight = 3, Tier = 1, Tag = "Gap", After = RUN_UPS },
+                { Id = "Tunnel_WashoutWide", Weight = 3, Tier = 2, Tag = "Gap", After = RUN_UPS },
+                { Id = "Tunnel_WashoutHuge", Weight = 3, Tier = 3, Tag = "Gap", After = RUN_UPS },
+                -- Three-way splits (Rules/Split): lean onto the open line; the other two end at buffer stops.
+                { Id = "Tunnel_Junction", Weight = 5, Tier = 2, Tag = "Split" },
+                { Id = "Tunnel_JunctionTight", Weight = 4, Tier = 3, Tag = "Split" },
+                -- Caverns (the rifts and the abyss are broken trestles to jump).
+                { Id = "Cavern_Lake", Weight = 4, Tier = 1, Tag = "Cavern" },
+                { Id = "Cavern_Garden", Weight = 4, Tier = 1, Tag = "Cavern" },
+                { Id = "Cavern_Crystal", Weight = 4, Tier = 1, Tag = "Cavern" },
+                { Id = "Cavern_Pool", Weight = 4, Tier = 1, Tag = "Cavern" },
+                { Id = "Cavern_Glow", Weight = 4, Tier = 1, Tag = "Cavern" },
+                { Id = "Cavern_Chasm", Weight = 4, Tier = 2, Tag = "Cavern" },
+                { Id = "Cavern_Pit", Weight = 4, Tier = 2, Tag = "Cavern" },
+                { Id = "Cavern_Rift", Weight = 4, Tier = 2, Tag = "Cavern" },
+                { Id = "Cavern_RiftWide", Weight = 3, Tier = 3, Tag = "Cavern" },
+                { Id = "Cavern_Abyss", Weight = 3, Tier = 3, Tag = "Cavern" },
             },
             -- How far apart each kind turns up, in segments: never closer than Spacing[1], and forced once
             -- Spacing[2] have gone by. NoRepeat: never the same chunk twice running. NotAfter: never straight
-            -- after one of these (no sharp bend right after landing a jump).
+            -- after one of these (no sharp bend right after landing a jump or a split, no bend straight after a
+            -- steep drop: room to slow down).
             Tags = {
-                Sharp = { Spacing = { 3, 6 }, NotAfter = { "Gap" } },
+                Sharp = { Spacing = { 3, 6 }, NotAfter = { "Gap", "Steep", "Split" } },
+                Bend = { Spacing = { 0, 99 }, NotAfter = { "Steep" } },
                 Gap = { Spacing = { 4, 9 } },
+                Split = { Spacing = { 6, 14 } },
+                Steep = { Spacing = { 2, 99 } },
                 Cavern = { Spacing = { 4, 8 }, NoRepeat = true },
             },
-            EveryLeg = { "Cavern", "Sharp" }, -- every leg has at least one of each
+            EveryLeg = { "Cavern", "Sharp" }, -- every leg has at least one of each (unless its Difficulty says)
+            -- Leg difficulties: Tiers scales chunk weights by tier (easy, medium, hard), Spacing tightens tag
+            -- spacing, EveryLeg adds tags the leg must have.
+            Difficulty = {
+                Easy = { Tiers = { 1, 0.35, 0 }, EveryLeg = { "Cavern", "Sharp" } },
+                Medium = { Tiers = { 0.7, 1, 0.3 }, EveryLeg = { "Cavern", "Split", "Sharp" } },
+                Hard = {
+                    Tiers = { 0.35, 0.9, 1.5 },
+                    Spacing = { Sharp = { 2, 5 }, Gap = { 3, 7 }, Split = { 5, 10 } },
+                    EveryLeg = { "Cavern", "Gap", "Split", "Sharp" },
+                },
+            },
             EdgeTunnels = 2, -- plain tunnel segments at each end of a leg, between caverns and stops
             -- The track never turns further than this from the zone's heading, so it can't loop over itself.
             MaxHeading = 1.4,
         },
         Mobs = { "Crawler", "Bat" },
-        -- 60 segments in all: a stop after every 20 (about 40-45 seconds of riding between stops).
+        -- 60 segments in all: a stop after every 20 (about 40-45 seconds of riding between stops), getting
+        -- harder toward the end.
         Legs = {
-            { Ride = { Segments = 20, Ambushes = { 2, 3 } }, Stop = { Stage = "Obby" } },
+            { Ride = { Segments = 20, Difficulty = "Easy", Ambushes = { 2, 3 } }, Stop = { Stage = "Obby" } },
             {
-                Ride = { Segments = 20, Ambushes = { 3, 4 } },
+                Ride = { Segments = 20, Difficulty = "Medium", Ambushes = { 3, 4 } },
                 Stop = { Fork = { "SignalRoom", "SupplyDepot" }, Options = 2 },
             },
-            { Ride = { Segments = 20, Ambushes = { 4, 5 } }, Stop = { Stage = "ForemanBoss" } },
+            {
+                Ride = { Segments = 20, Difficulty = "Hard", Ambushes = { 4, 5 } },
+                Stop = { Stage = "ForemanBoss" },
+            },
         },
     },
     { Id = "CrystalHollows", Name = "Crystal Hollows", Built = false },

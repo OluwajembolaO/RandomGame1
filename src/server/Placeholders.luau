@@ -88,9 +88,10 @@ local function sign(model: Instance, at: CFrame, title: string, subtitle: string
     })
 end
 
--- A warning sign before each gap whose sign falls between `from` and `to` along the track (so each chunk
--- carries its own signs), with the speed it takes to jump it.
-function Placeholders.gapSigns(parent: Instance, layout: Layout.Layout, from: number, to: number)
+-- Warning signs whose spot falls between `from` and `to` along the track (so each chunk carries its own):
+-- before each gap, with the speed it takes to jump it; before each three-way split, telling the crew to
+-- take the green line.
+function Placeholders.warningSigns(parent: Instance, layout: Layout.Layout, from: number, to: number)
     local cart = Configs.Run.Cart
     for _, gap in layout.track.gaps do
         local signAt = math.max(0, gap.from - 70)
@@ -102,6 +103,13 @@ function Placeholders.gapSigns(parent: Instance, layout: Layout.Layout, from: nu
                 else "NEED " .. need .. " — DON'T BRAKE"
             local at = TrackFrames.flat(layout.track, signAt)
             sign(parent, at * CFrame.new(0, 10, 0), "GAP AHEAD", advice, Theme.Color.Danger)
+        end
+    end
+    for _, split in layout.track.splits do
+        local signAt = math.max(0, split.from - 100)
+        if signAt >= from and signAt < to then
+            local at = TrackFrames.flat(layout.track, signAt)
+            sign(parent, at * CFrame.new(0, 10, 0), "SPLIT AHEAD", "LEAN ONTO THE GREEN LINE", Theme.Color.Lamp)
         end
     end
 end

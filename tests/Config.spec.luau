@@ -45,7 +45,14 @@ T.describe("Config", function()
                 expect(kit.Stop, "Stop")
                 expect(kit.Cap, "Cap")
                 expect(kit.Straight, "Tunnel")
-                local KIND_OF_TAG = { Cavern = "Cavern", Sharp = "Tunnel", Bend = "Tunnel", Gap = "Tunnel" }
+                local KIND_OF_TAG = {
+                    Cavern = "Cavern",
+                    Sharp = "Tunnel",
+                    Bend = "Tunnel",
+                    Gap = "Tunnel",
+                    Split = "Tunnel",
+                    Steep = "Tunnel",
+                }
                 local seen = {}
                 for _, chunk in kit.Chunks do
                     T.falsy(seen[chunk.Id], zone.Id .. " lists " .. chunk.Id .. " twice")
@@ -58,6 +65,18 @@ T.describe("Config", function()
                     end
                     T.equal(def.Sharp, chunk.Tag == "Sharp", chunk.Id .. " is tagged Sharp exactly when it's sharp")
                     T.equal(def.Gap ~= nil and def.Kind == "Tunnel", chunk.Tag == "Gap", chunk.Id .. " Gap tag")
+                    T.equal(
+                        def.Split ~= nil,
+                        chunk.Tag == "Split",
+                        chunk.Id .. " is tagged Split exactly when it splits"
+                    )
+                    T.truthy(
+                        chunk.Tier == nil or chunk.Tier == 1 or chunk.Tier == 2 or chunk.Tier == 3,
+                        chunk.Id .. " Tier is 1, 2 or 3"
+                    )
+                    if chunk.Tag then
+                        T.truthy(kit.Tags[chunk.Tag], chunk.Id .. " Tag " .. chunk.Tag .. " has no rule")
+                    end
                     for _, id in chunk.After or {} do
                         T.truthy(pieces[id], chunk.Id .. " After uses missing piece " .. id)
                     end
@@ -65,12 +84,30 @@ T.describe("Config", function()
                 T.truthy(seen[kit.Straight], zone.Id .. " pool needs its Straight")
                 for tag, rule in kit.Tags do
                     T.truthy(
-                        rule.Spacing[1] >= 1 and rule.Spacing[2] >= rule.Spacing[1],
+                        rule.Spacing[1] >= 0 and rule.Spacing[2] >= rule.Spacing[1],
                         zone.Id .. " " .. tag .. " Spacing"
                     )
                 end
                 for _, tag in kit.EveryLeg do
                     T.truthy(kit.Tags[tag], zone.Id .. " EveryLeg tag " .. tag .. " has no rule")
+                end
+                for name, difficulty in kit.Difficulty or {} do
+                    T.equal(#difficulty.Tiers, 3, name .. " Tiers")
+                    T.truthy(difficulty.Tiers[1] > 0, name .. " always has some easy chunks")
+                    for tag, spacing in difficulty.Spacing or {} do
+                        T.truthy(kit.Tags[tag], name .. " Spacing for unknown tag " .. tag)
+                        T.truthy(spacing[1] >= 0 and spacing[2] >= spacing[1], name .. " " .. tag .. " Spacing")
+                    end
+                    for _, tag in difficulty.EveryLeg or {} do
+                        T.truthy(kit.Tags[tag], name .. " EveryLeg tag " .. tag .. " has no rule")
+                    end
+                end
+                for index, leg in zone.Legs do
+                    local difficulty = leg.Ride.Difficulty
+                    T.truthy(
+                        difficulty == nil or (kit.Difficulty and kit.Difficulty[difficulty]),
+                        zone.Id .. " leg " .. index .. " has unknown Difficulty " .. tostring(difficulty)
+                    )
                 end
                 T.truthy(kit.MaxHeading < math.pi / 2, zone.Id .. " MaxHeading must stay under 90 degrees")
             end
@@ -171,12 +208,32 @@ T.describe("Config", function()
                 end
                 T.truthy(speed(1) > need + 2, id .. " can't be cleared even pushing")
                 T.truthy(speed(-1) < need, id .. " can be cleared under the brake")
-                if def.Kind == "Tunnel" then
-                    T.truthy(speed(0) > need, id .. ": washouts clear at cruise speed")
+                local tier = (Kit.chunk(Configs.Zones[1].Kit, id) or {}).Tier or 1
+                if def.Kind == "Tunnel" and tier < 3 then
+                    T.truthy(speed(0) > need, id .. ": easy and medium washouts clear at cruise speed")
                 end
             end
         end
         T.truthy(count >= 2, "expected the washout and the rift")
+    end)
+
+    T.it("makes every junction a straight hall with room for its lanes", function()
+        local count = 0
+        for id, def in pieces do
+            local split = def.Split
+            if split then
+                count += 1
+                T.equal(def.Kind, "Tunnel", id)
+                T.equal(def.Turn, 0, id .. " junctions are straight")
+                T.falsy(def.Gap, id .. " a junction isn't a jump too")
+                T.truthy(split.From >= 16, id .. " needs track before the switch to read the signals")
+                T.truthy(split.From + split.Ramp <= split.Buffer, id .. " lanes are apart before the buffers")
+                T.truthy(split.Buffer <= split.To - split.Ramp, id .. " the open lane rejoins after the buffers")
+                T.truthy(split.To <= def.Length, id .. " rejoins inside the chunk")
+                T.truthy(split.Offset >= 7, id .. " lanes far enough apart for the cart")
+            end
+        end
+        T.truthy(count >= 2, "expected the junctions")
     end)
 
     T.it("keeps the ride camera gentle", function()

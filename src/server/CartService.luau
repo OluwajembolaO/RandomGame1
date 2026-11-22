@@ -25,6 +25,7 @@ local Configs = require(Shared.Configs)
 local Remotes = require(Shared.Remotes)
 local RunInfo = require(Shared.RunInfo)
 local Jump = require(Shared.Rules.Jump)
+local Split = require(Shared.Rules.Split)
 local Track = require(Shared.Rules.Track)
 local TrackFrames = require(Shared.TrackFrames)
 
@@ -91,6 +92,10 @@ type Crash = {
     walkway: Instance,
 }
 local crash: Crash? = nil
+
+-- The three-way split the cart is going through, and the lane it took at the switch (Rules/Split).
+type Junction = { span: Track.SplitSpan, lane: number }
+local junction: Junction? = nil
 
 local function claimOwnership()
     local part = root
@@ -316,10 +321,17 @@ local RIGHTING_SECONDS = 0.7 -- swinging back up onto the rails
 local FADE_HOLD = 0.45 -- after the fade starts, seconds until the screen is black and the cart can move
 local RIDER_SPACING = 3
 
--- On the rails at the current distance, with the body's roll.
+-- On the rails at the current distance, with the body's roll; in a split, on the lane it took, turned along it.
 local function onRails(withRoll: number): CFrame
     local current = track :: Track.Track
-    return TrackFrames.frame(current, distance) * CFrame.Angles(0, 0, withRoll)
+    local frame = TrackFrames.frame(current, distance)
+    local inSplit = junction
+    if inSplit then
+        local here = Split.offset(inSplit.span, inSplit.lane, distance)
+        local ahead = Split.offset(inSplit.span, inSplit.lane, distance + 1)
+        frame *= CFrame.new(here, 0, 0) * CFrame.Angles(0, -math.atan(ahead - here), 0)
+    end
+    return frame * CFrame.Angles(0, 0, withRoll)
 end
 
 local function pose()
@@ -417,7 +429,7 @@ function CartService.spawn(
     locked = false
     chewers = 0
     roll = 0
-    mode, free, flight = "Track", nil, nil
+    mode, free, flight, junction = "Track", nil, nil, nil
 
     -- Pivot onto the track before parenting, so the unanchored parts never fall from the origin.
     local cart, base, list = build(palette)
@@ -465,7 +477,7 @@ function CartService.destroy()
     model, root, alignPosition, alignOrientation, track = nil, nil, nil, nil, nil
     seats = {}
     rolling = false
-    mode, free, flight = "Track", nil, nil
+    mode, free, flight, junction = "Track", nil, nil, nil
 end
 
 function CartService.model(): Model?
@@ -620,7 +632,7 @@ end
 
 -- An invisible floor along the rails around the crash, so the crew can stand beside the cart anywhere
 -- (even out on a trestle over a chasm).
-local function walkway(around: number): Instance
+local function walkway(around: number, width: number): Instance
     local current = track :: Track.Track
     local folder = Instance.new("Folder")
     folder.Name = "CrashWalkway"
@@ -639,7 +651,7 @@ local function walkway(around: number): Instance
         part.CanQuery = false
         part.CanTouch = false
         -- Thick, so someone landing on it fast can't pass straight through between physics steps.
-        part.Size = Vector3.new(18, 6, length + 0.5)
+        part.Size = Vector3.new(width, 6, length + 0.5)
         part.CFrame = frame * CFrame.new(0, floorTop - 3, 0)
         part.Parent = folder
         d += length
@@ -649,10 +661,12 @@ local function walkway(around: number): Instance
 end
 
 -- Tips the cart over beside the rails: everyone's put out on the other side and has to push it back on.
--- `side` is 1 to fall to the left (the outside of a right bend), -1 to the right.
-local function tipOver(side: number, immediate: boolean)
+-- `side` is 1 to fall to the left (the outside of a right bend), -1 to the right. `lateral` is how far right
+-- of the line the cart was (a split's side lane).
+local function tipOver(side: number, immediate: boolean, lateral: number?)
     local current = track :: Track.Track
-    local flat = TrackFrames.flat(current, distance)
+    local across = lateral or 0
+    local flat = TrackFrames.flat(current, distance) * CFrame.new(across, 0, 0)
     local resting = flat * CFrame.new(0, 3.3, 0) * CFrame.Angles(0, 0, side * TIP_ANGLE)
 
     local riders = CartService.riders()
@@ -691,7 +705,7 @@ local function tipOver(side: number, immediate: boolean)
         progress = 0,
         righting = false,
         holders = {},
-        walkway = walkway(distance),
+        walkway = walkway(distance, 18 + 2 * math.abs(across)),
     }
     free = if immediate then resting else onRails(roll)
     roll = 0
@@ -859,7 +873,30 @@ local function trackStep(current: Track.Track, dt: number)
         takeOff(gap)
         return
     end
+
+    -- A three-way split: the crew's lean at the switch picks the lane (Rules/Split).
+    local split = Track.nextSplit(current, distance)
+    if split and not junction and distance <= split.from and nextDistance >= split.from then
+        local picked = Split.lane(state.lean)
+        junction = { span = split, lane = picked }
+        Remotes.Effect:FireAllClients("Sound", "BrakeClunk", TrackFrames.position(current, split.from))
+    end
     distance = nextDistance
+    local inSplit = junction
+    if inSplit then
+        if Split.dead(inSplit.span, inSplit.lane) and distance >= inSplit.span.buffer - 1.5 then
+            -- Into the buffer stop at the end of a dead lane. Pushed back on, the cart goes onto the open lane.
+            distance = inSplit.span.buffer - 1.5
+            local lateral = Split.offset(inSplit.span, inSplit.lane, distance)
+            tipOver(if inSplit.lane < 0 then 1 else -1, false, lateral)
+            inSplit.lane = inSplit.span.open
+            Remotes.Effect:FireAllClients("Shake", 1.2)
+            return
+        end
+        if distance >= inSplit.span.to then
+            junction = nil
+        end
+    end
 
     if rolling and target - distance <= ARRIVE_WITHIN then
         distance = target
@@ -902,6 +939,12 @@ local function replicate(current: Track.Track)
     local gap = Track.nextGap(current, distance)
     RunInfo.set("GapIn", if gap and onTrack then math.floor(math.max(0, gap.from - distance)) else -1)
     RunInfo.set("GapNeed", if gap then math.ceil(Jump.minSpeed(JUMP, gap)) else 0)
+    -- Splits: how far to the next switch, and which lane the crew's lean would take right now (or took).
+    local split = Track.nextSplit(current, distance)
+    local before = split and distance <= split.from
+    RunInfo.set("SplitIn", if split and before and onTrack then math.floor(split.from - distance) else -1)
+    local taken = junction
+    RunInfo.set("SplitPick", if taken then taken.lane else Split.lane(state.lean))
     local speed = if flight then flight.speed elseif onTrack then state.speed else 0
     RunInfo.set("Speed", math.round(speed))
     RunInfo.set("Distance", math.floor(distance)) -- along the track, for the HUD's depth meter
