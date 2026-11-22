@@ -120,16 +120,16 @@ return {
             MaxHeading = 1.4,
         },
         Mobs = { "Crawler", "Bat" },
-        -- 60 segments in all: a stop after every 20 (about 40-45 seconds of riding between stops), getting
+        -- 125 segments in all: 30 easy, 45 medium and 50 hard, a stop after each stretch, getting
         -- harder toward the end.
         Legs = {
-            { Ride = { Segments = 20, Difficulty = "Easy", Ambushes = { 2, 3 } }, Stop = { Stage = "Obby" } },
+            { Ride = { Segments = 30, Difficulty = "Easy", Ambushes = { 2, 3 } }, Stop = { Stage = "Obby" } },
             {
-                Ride = { Segments = 20, Difficulty = "Medium", Ambushes = { 3, 4 } },
+                Ride = { Segments = 45, Difficulty = "Medium", Ambushes = { 3, 4 } },
                 Stop = { Fork = { "SignalRoom", "SupplyDepot" }, Options = 2 },
             },
             {
-                Ride = { Segments = 20, Difficulty = "Hard", Ambushes = { 4, 5 } },
+                Ride = { Segments = 50, Difficulty = "Hard", Ambushes = { 4, 5 } },
                 Stop = { Stage = "ForemanBoss" },
             },
         },
