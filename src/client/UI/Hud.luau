@@ -1,13 +1,13 @@
 --!strict
--- The run HUD, in the mine's rustic style (UI/Rustic, Shared/Theme): a hanging plank sign with the zone or
--- stop and a brass tag with the segment number, a parchment note for messages, a painted warning plank
--- (off the rails, tipping, a gap and the speed it needs, a sharp bend and which way to lean), the cart's
--- HP in an iron trough, a note on how you're driving, the rivet gun's ammo on a brass plate, and the depth
--- meter down the right (UI/DepthMeter).
+-- The run HUD, in the mine's rustic style (UI/Rustic, Shared/Theme): an old sign swinging on its chains
+-- with the zone or stop and a brass tag with the segment number (UI/HangingSign), a parchment note for
+-- messages, a warning plank that slams in with its lamps flashing (UI/Warning: off the rails, tipping, a
+-- split, a gap and the speed it needs, a sharp bend and which way to lean), the cart's HP in an iron trough,
+-- a note on how you're driving, the rivet gun's ammo on a brass plate, and the depth meter down the right
+-- (UI/DepthMeter).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 
 local React = require(ReplicatedStorage.Packages.React)
 
@@ -15,15 +15,15 @@ local Configs = require(ReplicatedStorage.Shared.Configs)
 local RunInfo = require(ReplicatedStorage.Shared.RunInfo)
 local Theme = require(ReplicatedStorage.Shared.Theme)
 local DepthMeter = require(script.Parent.DepthMeter)
+local HangingSign = require(script.Parent.HangingSign)
 local Rustic = require(script.Parent.Rustic)
+local Warning = require(script.Parent.Warning)
 local useAttribute = require(script.Parent.useAttribute)
 
 local e = React.createElement
 local C = Theme.Color
 local info = RunInfo.instance()
 local me = Players.LocalPlayer
-
-local POP = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
 -- Which way to lean into a bend: 1 for a right-hand bend, -1 for a left.
 local function leanText(side: number): string
@@ -40,65 +40,6 @@ local PHASE_TITLES = {
     Wipe = "WIPED OUT",
     Voting = "VOTE",
 }
-
--- Pops a UIScale up and back each time `key` changes (a new warning slams onto the screen).
-local function usePop(key: string?)
-    local scale = React.useRef(nil :: UIScale?)
-    React.useEffect(function()
-        local node = scale.current
-        if node and key then
-            node.Scale = 1.25
-            TweenService:Create(node, POP, { Scale = 1 }):Play()
-        end
-    end, { key })
-    return scale
-end
-
--- The hanging sign: two chains down from the top of the screen, a plank with the title, and a brass tag.
-local function Sign(props: { title: string, tag: string? })
-    local chain = function(x: number)
-        return e("Frame", {
-            AnchorPoint = Vector2.new(0.5, 1),
-            Position = UDim2.fromScale(x, 0),
-            Size = UDim2.fromOffset(3, 40),
-            BackgroundColor3 = C.IronLight,
-            BorderSizePixel = 0,
-        })
-    end
-    return Rustic.plank({
-        size = UDim2.fromScale(0.32, 0.075),
-        position = UDim2.new(0.5, 0, 0, 30),
-        anchor = Vector2.new(0.5, 0),
-        aspect = 5.6,
-        seams = 1,
-    }, {
-        ChainL = chain(0.12),
-        ChainR = chain(0.88),
-        Title = Rustic.text({
-            text = props.title,
-            font = Theme.Font.Sign,
-            color = C.Paper,
-            size = UDim2.fromScale(0.86, 0.66),
-            maxSize = 34,
-            stroke = 2,
-        }),
-        Tag = if props.tag
-            then Rustic.brass({
-                size = UDim2.fromScale(0.7, 0.46),
-                position = UDim2.new(0.5, 0, 1, 4),
-                anchor = Vector2.new(0.5, 0),
-                rotation = -1.5,
-            }, {
-                Text = Rustic.text({
-                    text = props.tag,
-                    font = Theme.Font.Stamp,
-                    color = C.Ink,
-                    maxSize = 18,
-                }),
-            })
-            else nil,
-    })
-end
 
 local function Hud()
     local phase = useAttribute(info, "Phase", "Station")
@@ -148,27 +89,30 @@ local function Hud()
     end
 
     -- The one warning that matters most right now: off the rails, tipping, a split, a gap, then a sharp bend.
+    -- Danger is for the ones that need doing something about this second.
     local warning: string? = nil
+    local warningKind = ""
     local warningColor = C.Danger
+    local danger = false
     local hint: string? = nil
     if riding and derailed then
-        warning = "OFF THE RAILS!"
+        warning, warningKind, danger = "OFF THE RAILS!", "Derailed", true
         hint = "HOLD [E] ON THE CART TO PUSH IT BACK ON — MORE HANDS, FASTER"
     elseif riding and tilt > 0.15 then
-        warning = "TIPPING!  " .. leanText(leanSide)
+        warning, warningKind, danger = "TIPPING!  " .. leanText(leanSide), "Tipping", true
     elseif riding and splitIn >= 0 and splitIn <= SPLIT_WARN then
-        warning = "THREE-WAY SPLIT — TAKING " .. LANES[splitPick]
+        warning, warningKind = "THREE-WAY SPLIT — TAKING " .. LANES[splitPick], "Split"
         warningColor = C.Lamp
-        hint = "[Q] LEAN LEFT  ·  HOLD STEADY  ·  [E] LEAN RIGHT — TAKE THE GREEN LINE"
+        hint = "[Q] LEFT  ·  HOLD STEADY  ·  [E] RIGHT — TAKE THE GREEN LINE"
     elseif riding and gapIn >= 0 and gapIn <= Configs.Run.Cart.Jump.WarnDistance then
         local fastEnough = speed >= gapNeed
-        warning = "GAP AHEAD — NEED " .. gapNeed .. "  ·  YOU " .. speed
+        warning, warningKind = "GAP AHEAD — NEED " .. gapNeed .. "  ·  YOU " .. speed, "Gap"
         warningColor = if fastEnough then C.Safe else C.Danger
+        danger = not fastEnough
         hint = if fastEnough then "KEEP IT UP" else "HOLD [W] TO PUSH — DON'T BRAKE"
     elseif riding and sharpIn >= 0 and sharpIn <= Configs.Run.Cart.SharpWarnDistance then
-        warning = "SHARP BEND — SLOW DOWN OR " .. leanText(sharpSide)
+        warning, warningKind = "SHARP BEND — SLOW DOWN OR " .. leanText(sharpSide), "Sharp"
     end
-    local popRef = usePop(if warning then string.match(warning, "^[^%d]+") else nil)
 
     local driveText = if braking
         then "BRAKING"
@@ -181,13 +125,14 @@ local function Hud()
     end
 
     return e("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, {
-        Sign = e(Sign, { title = title, tag = tag }),
+        Sign = e(HangingSign, { title = title, tag = tag }),
         Note = if note ~= ""
             then Rustic.paper({
                 size = UDim2.fromScale(0.3, 0.05),
                 position = UDim2.fromScale(0.5, 0.215),
                 rotation = 1,
                 aspect = 9,
+                stained = 2,
             }, {
                 Text = Rustic.text({
                     text = note,
@@ -199,30 +144,15 @@ local function Hud()
             })
             else nil,
         Warning = if warning
-            then Rustic.plank({
-                size = UDim2.fromScale(0.52, 0.085),
-                position = UDim2.fromScale(0.5, 0.34),
-                rotation = -1.5,
-                aspect = 8,
-                seams = 1,
-            }, {
-                Pop = e("UIScale", { ref = popRef }),
-                Text = Rustic.text({
-                    text = warning,
-                    font = Theme.Font.Sign,
-                    color = warningColor,
-                    size = UDim2.fromScale(0.92, 0.66),
-                    maxSize = 40,
-                    stroke = 2.5,
-                }),
-            })
+            then e(Warning, { kind = warningKind, text = warning, color = warningColor, danger = danger })
             else nil,
         Hint = if hint
             then Rustic.paper({
                 size = UDim2.fromScale(0.44, 0.042),
-                position = UDim2.fromScale(0.5, 0.405),
+                position = UDim2.fromScale(0.5, 0.435),
                 rotation = 0.8,
                 aspect = 14,
+                stained = 9,
             }, {
                 Text = Rustic.text({
                     text = hint,
@@ -236,7 +166,7 @@ local function Hud()
         PushBack = if riding and derailed
             then Rustic.bar({
                 size = UDim2.fromScale(0.28, 0.038),
-                position = UDim2.fromScale(0.5, 0.46),
+                position = UDim2.fromScale(0.5, 0.49),
                 aspect = 10,
                 fraction = pushBack,
                 color = C.Brass,
@@ -249,6 +179,7 @@ local function Hud()
                 position = UDim2.new(0.5, 0, 1, -66),
                 anchor = Vector2.new(0.5, 1),
                 aspect = 16,
+                stained = 4,
             }, {
                 Text = Rustic.text({
                     text = driveText,

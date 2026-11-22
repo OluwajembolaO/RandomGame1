@@ -112,4 +112,13 @@ return {
     Weapons = {
         Rivet = { Id = 9117052716, Volume = 0.5 },
     },
+
+    -- Not in the world: they play straight into your ears (Audio.ui), though they still echo.
+    Ui = {
+        -- Someone hammering a pit prop with a wrench: the old mine's alarm, when a warning slams up that
+        -- needs doing something about right now (off the rails, tipping, too slow for a gap).
+        Alarm = { Id = 9116765714, Volume = 0.55 },
+        -- A lighter knock, for the warnings you can see coming (bends, splits, gaps you're fast enough for).
+        Heads = { Id = 9116766390, Volume = 0.3 },
+    },
 }

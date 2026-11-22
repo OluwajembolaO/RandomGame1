@@ -78,6 +78,20 @@ function Audio.at(name: string, position: Vector3, pitch: number?, loudness: num
     Debris:AddItem(anchor, math.max(2, sound.TimeLength + 0.5) + 6)
 end
 
+-- A sound straight into your ears rather than from somewhere in the world (Sounds.Ui), at `loudness`
+-- times its usual volume.
+function Audio.ui(name: string, loudness: number?)
+    local spec = (Sounds :: any).Ui[name]
+    if not spec then
+        return
+    end
+    local sound = make(spec, SoundService, group("Effects", 1), false)
+    sound.Volume *= loudness or 1
+    sound.PlaybackSpeed = 0.95 + math.random() * 0.1
+    sound:Play()
+    Debris:AddItem(sound, math.max(2, sound.TimeLength + 0.5) + 6)
+end
+
 type CartSounds = {
     rolling: Sound,
     wind: Sound,

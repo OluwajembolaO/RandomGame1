@@ -158,6 +158,7 @@ local function DepthMeter(): any
             position = UDim2.new(0.5, 0, 1, 28),
             anchor = Vector2.new(0.5, 0),
             seams = 1,
+            worn = 11,
         }, {
             To = Rustic.text({
                 text = if goal then "TO " .. string.upper(goal.name) else "JOURNEY'S END",
